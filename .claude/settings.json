@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(grep -n \"saldo\\\\|Saldo\\\\|credit\\\\|debit\\\\|0\\\\.00\\\\|R\\\\$\" \"d:/Francisco Hernandes/APPS ANTIGRAVITY/Agilis/src/pages/Transactions.jsx\")"
+    ]
+  }
+}
