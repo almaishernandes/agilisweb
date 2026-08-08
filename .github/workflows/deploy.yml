@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -36,6 +36,13 @@ jobs:
           RewriteRule ^ index.html [L]
           EOF
 
+      - name: Normalize server-dir (must end with /)
+        id: ftpdir
+        run: |
+          dir="${{ secrets.FTP_SERVER_DIR }}"
+          [[ "$dir" != */ ]] && dir="${dir}/"
+          echo "value=$dir" >> "$GITHUB_OUTPUT"
+
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -43,4 +50,4 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist/
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          server-dir: ${{ steps.ftpdir.outputs.value }}
