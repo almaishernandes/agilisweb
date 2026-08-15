@@ -109,7 +109,7 @@ export default function OpenFinance() {
 
             const pluggyConnect = new window.PluggyConnect({
                 connectToken: data.connectToken,
-                includeSandbox: false,
+                includeSandbox: true, // necessário no modo trial da Pluggy — sem isso, o conector "Pluggy Bank" (sandbox) fica escondido da lista
                 onSuccess: async (itemData) => {
                     const { data: reg, error: regErr } = await supabase.functions.invoke('open-finance-connect-token', {
                         body: { action: 'register-item', itemId: itemData.item.id },
