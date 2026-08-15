@@ -3,7 +3,7 @@ import MainLayout from '../../components/MainLayout';
 import { supabase } from '../../lib/supabase';
 import { getSecurityContext } from '../../lib/auth';
 
-const PLUGGY_CONNECT_SCRIPT_URL = 'https://cdn.pluggy.ai/pluggy-connect/v2.9.5/pluggy-connect.js';
+const PLUGGY_CONNECT_SCRIPT_URL = 'https://cdn.pluggy.ai/pluggy-connect.js';
 
 const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') : '—';
