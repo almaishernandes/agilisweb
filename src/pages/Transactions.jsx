@@ -3109,6 +3109,16 @@ const Transactions = () => {
                                                                               })()
                                                                         : col.type === 'date' && t[col.key]
                                                                             ? (() => { const [y, m, d] = t[col.key].split('-'); return `${d}/${m}/${y}`; })()
+                                                                        : col.key === 'description'
+                                                                            ? <>
+                                                                                {t.origin === 'OPEN_FINANCE' && (
+                                                                                    <span title={t.is_conciliated ? 'Importado via Open Finance \u2014 conciliado' : 'Importado via Open Finance \u2014 pendente de revis\u00E3o'}
+                                                                                        style={{ marginRight: '5px', fontSize: '10px', background: t.is_conciliated ? '#e8f5e9' : '#fff3e0', color: t.is_conciliated ? '#2e7d32' : '#e65100', borderRadius: '3px', padding: '1px 4px', fontWeight: 'bold' }}>
+                                                                                        \uD83C\uDFE6{t.is_conciliated ? '\u2713' : ''}
+                                                                                    </span>
+                                                                                )}
+                                                                                {t.description || '\u00A0'}
+                                                                              </>
                                                                             : (t[col.key] || '\u00A0')
                                                                     }
                                                                 </div>

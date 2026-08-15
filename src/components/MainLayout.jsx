@@ -44,6 +44,7 @@ const SIDEBAR_MAP = [
         items: [
             { to: '/integracao/nfce',   label: 'NFC-e / Cupom Fiscal' },
             { to: '/integracao/mobile', label: 'NFC-App Agilis' },
+            { to: '/integracao/open-finance', label: 'Open Finance' },
         ],
     },
     {

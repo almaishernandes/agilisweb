@@ -27,6 +27,7 @@ import Compras from './pages/Compras';
 import FornecedoresRelatorio from './pages/FornecedoresRelatorio';
 import NFCeIntegracao from './pages/integracao/NFCeIntegracao';
 import MobileImports from './pages/integracao/MobileImports';
+import OpenFinance from './pages/integracao/OpenFinance';
 import CotacaoPrecos from './pages/CotacaoPrecos';
 
 const ProtectedRoute = ({ children, requiredRole = null }) => {
@@ -101,6 +102,7 @@ function App() {
       <Route path="/integracao" element={<Navigate to="/integracao/nfce" replace />} />
       <Route path="/integracao/nfce" element={<ProtectedRoute><NFCeIntegracao /></ProtectedRoute>} />
       <Route path="/integracao/mobile" element={<ProtectedRoute><MobileImports /></ProtectedRoute>} />
+      <Route path="/integracao/open-finance" element={<ProtectedRoute><OpenFinance /></ProtectedRoute>} />
       <Route path="/cotacao-precos" element={<ProtectedRoute><CotacaoPrecos /></ProtectedRoute>} />
       <Route path="/gestao" element={<Navigate to="/gestao/dashboard" replace />} />
       <Route path="/gestao/dashboard" element={<ProtectedRoute><GestaoDashboard /></ProtectedRoute>} />
