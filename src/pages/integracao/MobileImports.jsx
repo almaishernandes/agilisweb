@@ -797,6 +797,9 @@ export default function MobileImports() {
                                 )}
                             </div>
 
+                            {/* Comprovante (foto/QR enviado pelo app) */}
+                            {selected.file_path && <ComprovanteViewer filePath={selected.file_path} />}
+
                             {/* Dados brutos JSON */}
                             <RawDataViewer data={selected.raw_data} />
 
@@ -923,6 +926,39 @@ export default function MobileImports() {
                 </div>
             )}
         </MainLayout>
+    );
+}
+
+function ComprovanteViewer({ filePath }) {
+    const [signedUrl, setSignedUrl] = useState(null);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSignedUrl(null);
+        setError(false);
+        supabase.storage.from('comprovantes').createSignedUrl(filePath, 3600).then(({ data, error }) => {
+            if (cancelled) return;
+            if (error || !data?.signedUrl) { setError(true); return; }
+            setSignedUrl(data.signedUrl);
+        });
+        return () => { cancelled = true; };
+    }, [filePath]);
+
+    return (
+        <div style={{ background: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', padding: '16px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: '10px' }}>Comprovante</div>
+            {error && <div style={{ fontSize: '12px', color: '#c62828' }}>Não foi possível carregar o comprovante.</div>}
+            {!error && !signedUrl && <div style={{ fontSize: '12px', color: '#aaa' }}>Carregando...</div>}
+            {signedUrl && (
+                <>
+                    <img src={signedUrl} alt="Comprovante" style={{ maxWidth: '100%', maxHeight: '360px', borderRadius: '6px', display: 'block', marginBottom: '10px' }} />
+                    <a href={signedUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: '#1565c0', fontWeight: 'bold' }}>
+                        ⬇ Baixar / abrir em nova aba
+                    </a>
+                </>
+            )}
+        </div>
     );
 }
 
