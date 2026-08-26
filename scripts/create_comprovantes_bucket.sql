@@ -10,13 +10,15 @@ values ('comprovantes', 'comprovantes', false)
 on conflict (id) do nothing;
 
 -- Qualquer usuário autenticado do app pode enviar comprovantes
-create policy if not exists "Authenticated upload comprovantes"
+drop policy if exists "Authenticated upload comprovantes" on storage.objects;
+create policy "Authenticated upload comprovantes"
     on storage.objects for insert
     to authenticated
     with check (bucket_id = 'comprovantes');
 
 -- Qualquer usuário autenticado pode ler (necessário para gerar signed URLs)
-create policy if not exists "Authenticated read comprovantes"
+drop policy if exists "Authenticated read comprovantes" on storage.objects;
+create policy "Authenticated read comprovantes"
     on storage.objects for select
     to authenticated
     using (bucket_id = 'comprovantes');
