@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { getSecurityContext } from '../lib/auth';
 import { seedChartOfAccountsIfEmpty } from '../lib/seedChartOfAccounts';
 import AdvancedDatePicker from '../components/AdvancedDatePicker';
+import NewTransactionModal from '../components/NewTransactionModal';
 import { X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
@@ -25,6 +26,7 @@ const Transactions = () => {
     });
     const [editingCell, setEditingCell] = useState(null);
     const [headerFormOpen, setHeaderFormOpen] = useState(false);
+    const [newTxModalOpen, setNewTxModalOpen] = useState(false);
     const [editingRowId, setEditingRowId] = useState(null);
     const [sortField] = useState('due_date');
     const [selectedRowIds, setSelectedRowIds] = useState(new Set());
@@ -2570,11 +2572,14 @@ const Transactions = () => {
                                                 zIndex: 11,
                                             }}>
                                                 {col.key === 'selection' ? (
-                                                    <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                        <svg viewBox="0 0 24 24" width="26" height="26" fill="#ffffff">
-                                                            <path d="M2 9h11V5l9 7-9 7v-4H2z" />
-                                                        </svg>
-                                                    </div>
+                                                    <button
+                                                        onClick={() => setNewTxModalOpen(true)}
+                                                        title="Novo lançamento"
+                                                        style={{ height: '36px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#0d47a1', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: 11 }}
+                                                    >
+                                                        <span style={{ fontSize: 18, lineHeight: 1 }}>+</span>
+                                                        <span>NOVO LANÇAMENTO</span>
+                                                    </button>
                                                 ) : col.key === 'sequential_id' ? (
                                                     <input
                                                         type="text"
@@ -2753,10 +2758,6 @@ const Transactions = () => {
                                         const isEditingExisting = !!editingTx;
                                         const nextSeq = Math.max(0, ...transactions.filter(t => !t.isNew).map(t => Number(t.sequential_id) || 0)) + 1;
                                         const quickInputStyle = { ...headerBtnStyle, justifyContent: 'flex-start', width: '100%', borderRadius: 0, border: '1px solid #cfd8dc', background: '#fff', color: '#334155' };
-                                        const openForNewEntry = () => {
-                                            setHeaderFormOpen(true);
-                                            setTimeout(() => headerDescRef.current?.focus(), 50);
-                                        };
                                         const handleQuick = (field, value) => handleInputChange(formId, field, value);
                                         const handleQuickBlur = (overrides) => handleSave(formId, overrides || {});
                                         const closeForm = () => {
@@ -2801,16 +2802,7 @@ const Transactions = () => {
                                                     return (
                                                     <th key={col.key} colSpan={isPlusCell ? 2 : 1} style={{ width: isPlusCell ? undefined : col.width, padding: 0, borderBottom: '2px solid #cfd8dc', fontWeight: 'normal' }}>
                                                         {col.key === 'selection' ? (
-                                                            !headerFormOpen ? (
-                                                                <button
-                                                                    onClick={openForNewEntry}
-                                                                    title="Incluir novo lançamento"
-                                                                    style={{ ...headerBtnStyle, width: '100%', height: '36px', borderRadius: 0, background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: 0, gap: '8px' }}
-                                                                >
-                                                                    <span style={{ fontSize: '26px', lineHeight: 1 }}>+</span>
-                                                                    <span style={{ fontSize: '12px', fontWeight: 'bold' }}>INSERIR NOVO LANÇAMENTO</span>
-                                                                </button>
-                                                            ) : (
+                                                            !headerFormOpen ? null : (
                                                                 <button
                                                                     onClick={closeForm}
                                                                     title="Fechar formulário"
@@ -3313,6 +3305,14 @@ const Transactions = () => {
                         ))}
                     </div>
                 </div>
+            )}
+
+            {newTxModalOpen && selectedAccount && (
+                <NewTransactionModal
+                    account={selectedAccount}
+                    onClose={() => setNewTxModalOpen(false)}
+                    onCreated={() => fetchTransactions(selectedAccount)}
+                />
             )}
 
             {extratoOpen && (
