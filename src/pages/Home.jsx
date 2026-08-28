@@ -205,7 +205,6 @@ const Home = () => {
                                 <input
                                     type="email"
                                     required
-                                    autoFocus
                                     value={loginEmail}
                                     onChange={e => setLoginEmail(e.target.value)}
                                     style={{ width: '100%', padding: '11px 14px', borderRadius: '10px', border: '2px solid #eee', fontSize: '14px', outline: 'none', background: '#fafafa', boxSizing: 'border-box' }}
@@ -217,6 +216,7 @@ const Home = () => {
                                 <input
                                     type="password"
                                     required
+                                    autoFocus
                                     value={loginPassword}
                                     onChange={e => setLoginPassword(e.target.value)}
                                     style={{ width: '100%', padding: '11px 14px', borderRadius: '10px', border: '2px solid #eee', fontSize: '14px', outline: 'none', background: '#fafafa', boxSizing: 'border-box' }}
