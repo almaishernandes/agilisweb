@@ -10,6 +10,7 @@ import { X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 const headerBtnStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '10px', fontWeight: 'bold', height: '36px', padding: '0 10px', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' };
+const editInputStyle = { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box' };
 
 const Transactions = () => {
     const { accountId } = useParams();
@@ -684,30 +685,25 @@ const Transactions = () => {
         }));
     };
 
+    // Clique na célula de seleção: esquerdo abre o lançamento pra edição
+    // (modal); direito exclui, com confirmação.
     const handleRowSelectionClick = (e, id) => {
         e.stopPropagation();
         e.preventDefault();
-        setSelectedRowIds(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
+        const t = transactions.find(x => x.id === id);
+        if (!t || t.isNew) return;
+        setEditingRowId(id);
+        setHeaderFormOpen(true);
+    };
 
-            if (next.size === 1) {
-                const onlyId = Array.from(next)[0];
-                const t = transactions.find(x => x.id === onlyId);
-                if (t && !t.isNew) {
-                    setEditingRowId(onlyId);
-                    setHeaderFormOpen(true);
-                }
-            } else if (next.size > 1) {
-                // Mais de uma linha selecionada: não é edição, apenas duplicação/exclusão em lote
-                setEditingRowId(null);
-                setHeaderFormOpen(true);
-            } else {
-                setEditingRowId(null);
-            }
-            return next;
-        });
+    const handleRowContextMenu = (e, id) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const t = transactions.find(x => x.id === id);
+        if (!t || t.isNew) return;
+        if (window.confirm(`Excluir o lançamento "${t.description || t.sequential_id}"?`)) {
+            deleteTransaction(id);
+        }
     };
 
     const toggleSelectAll = () => {
@@ -2748,200 +2744,6 @@ const Transactions = () => {
                                             </th>
                                         ))}
                                     </tr>
-                                    {/* Third Header Row: Formulário de inclusão/edição, alinhado a cada coluna */}
-                                    {(() => {
-                                        const newTx = transactions.find(t => t.isNew);
-                                        if (!newTx) return null;
-                                        const editingTx = editingRowId ? transactions.find(t => t.id === editingRowId) : null;
-                                        const formTx = editingTx || newTx;
-                                        const formId = formTx.id;
-                                        const isEditingExisting = !!editingTx;
-                                        const nextSeq = Math.max(0, ...transactions.filter(t => !t.isNew).map(t => Number(t.sequential_id) || 0)) + 1;
-                                        const quickInputStyle = { ...headerBtnStyle, justifyContent: 'flex-start', width: '100%', borderRadius: 0, border: '1px solid #cfd8dc', background: '#fff', color: '#334155' };
-                                        const handleQuick = (field, value) => handleInputChange(formId, field, value);
-                                        const handleQuickBlur = (overrides) => handleSave(formId, overrides || {});
-                                        const closeForm = () => {
-                                            setEditingRowId(null);
-                                            setSelectedRowIds(new Set());
-                                            setHeaderFormOpen(false);
-                                        };
-                                        const handleIncluir = async () => {
-                                            await handleSave(formId, {});
-                                            closeForm();
-                                        };
-                                        const handleRastreio = () => {
-                                            const amt = parseBRNum(formTx.debit) || parseBRNum(formTx.credit);
-                                            if (!formTx.cost_center_id || !amt) {
-                                                alert('Informe o Centro de Custo e o valor (Saída/Entrada) antes de rastrear.');
-                                                return;
-                                            }
-                                            handleSave(formId, {}, true);
-                                        };
-                                        const handleDuplicar = async () => {
-                                            await duplicateTransaction(formId);
-                                            closeForm();
-                                        };
-                                        const handleExcluir = async () => {
-                                            await deleteTransaction(formId);
-                                            closeForm();
-                                        };
-                                        const bulkMode = selectedRowIds.size > 1;
-                                        const handleDuplicarLote = async () => {
-                                            await duplicateTransaction(Array.from(selectedRowIds));
-                                            closeForm();
-                                        };
-                                        const handleExcluirLote = async () => {
-                                            await deleteTransaction(Array.from(selectedRowIds));
-                                            closeForm();
-                                        };
-                                        return (
-                                            <tr style={{ background: '#eef7d8' }}>
-                                                {columns.map((col) => {
-                                                    const isPlusCell = col.key === 'selection' && !headerFormOpen;
-                                                    if (col.key === 'sequential_id' && !headerFormOpen && !bulkMode) return null;
-                                                    return (
-                                                    <th key={col.key} colSpan={isPlusCell ? 2 : 1} style={{ width: isPlusCell ? undefined : col.width, padding: 0, borderBottom: '2px solid #cfd8dc', fontWeight: 'normal' }}>
-                                                        {col.key === 'selection' ? (
-                                                            !headerFormOpen ? null : (
-                                                                <button
-                                                                    onClick={closeForm}
-                                                                    title="Fechar formulário"
-                                                                    style={{ ...headerBtnStyle, width: '100%', height: '36px', borderRadius: 0, background: '#0d47a1', border: '1px solid #0d47a1', padding: 0 }}
-                                                                >
-                                                                    <svg viewBox="0 0 24 24" width="26" height="26" fill="#ffffff">
-                                                                        <path d="M2 9h11V5l9 7-9 7v-4H2z" />
-                                                                    </svg>
-                                                                </button>
-                                                            )
-                                                        ) : !headerFormOpen ? (
-                                                            <div style={{ height: '36px' }} />
-                                                        ) : bulkMode && col.key === 'sequential_id' ? (
-                                                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d47a1' }}>
-                                                                <span style={{ fontSize: '10px', color: '#ffffff', fontWeight: 'bold' }}>{selectedRowIds.size}</span>
-                                                            </div>
-                                                        ) : bulkMode && col.key === 'saldo' ? (
-                                                            <div style={{ display: 'flex', width: '100%', height: '36px' }}>
-                                                                <button
-                                                                    onClick={handleExcluirLote}
-                                                                    title="Excluir lançamentos selecionados"
-                                                                    style={{ ...headerBtnStyle, flex: 1, borderRadius: 0, background: '#c62828', color: '#fff', border: '1px solid #c62828', padding: 0, fontSize: '9px' }}
-                                                                >
-                                                                    🗑 Excluir ({selectedRowIds.size})
-                                                                </button>
-                                                                <button
-                                                                    onClick={handleDuplicarLote}
-                                                                    title="Duplicar lançamentos selecionados"
-                                                                    style={{ ...headerBtnStyle, flex: 1, borderRadius: 0, background: '#6a1b9a', color: '#fff', border: '1px solid #6a1b9a', padding: 0, fontSize: '9px' }}
-                                                                >
-                                                                    ❐ Duplicar ({selectedRowIds.size})
-                                                                </button>
-                                                            </div>
-                                                        ) : bulkMode ? (
-                                                            <div style={{ height: '36px' }} />
-                                                        ) : col.key === 'sequential_id' ? (
-                                                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d47a1' }}>
-                                                                <span style={{ fontSize: '11px', color: '#ffffff', fontWeight: 'bold' }}>{isEditingExisting ? formTx.sequential_id : nextSeq}</span>
-                                                            </div>
-                                                        ) : col.key === 'cc_valor' ? (
-                                                            <button
-                                                                onClick={handleRastreio}
-                                                                title="Rastrear valores por Centro de Custo"
-                                                                style={{ ...headerBtnStyle, width: '100%', borderRadius: 0, background: '#1565c0', color: '#fff', border: '1px solid #1565c0', fontSize: '9px' }}
-                                                            >
-                                                                Rastreio
-                                                            </button>
-                                                        ) : col.key === 'saldo' ? (
-                                                            isEditingExisting ? (
-                                                                <div style={{ display: 'flex', width: '100%', height: '36px' }}>
-                                                                    <button
-                                                                        onClick={handleExcluir}
-                                                                        title="Excluir lançamento"
-                                                                        style={{ ...headerBtnStyle, flex: 1, borderRadius: 0, background: '#c62828', color: '#fff', border: '1px solid #c62828', padding: 0, fontSize: '9px' }}
-                                                                    >
-                                                                        🗑 Excluir
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={handleDuplicar}
-                                                                        title="Duplicar lançamento"
-                                                                        style={{ ...headerBtnStyle, flex: 1, borderRadius: 0, background: '#6a1b9a', color: '#fff', border: '1px solid #6a1b9a', padding: 0, fontSize: '9px' }}
-                                                                    >
-                                                                        ❐ Duplicar
-                                                                    </button>
-                                                                    <button
-                                                                        ref={(el) => { rowFieldRefs.current.saldo = el; }}
-                                                                        onClick={handleIncluir}
-                                                                        onKeyDown={handleRowTab('saldo')}
-                                                                        style={{ ...headerBtnStyle, flex: 1, borderRadius: 0, background: '#00695c', color: '#fff', border: '1px solid #00695c', padding: 0, fontSize: '9px' }}
-                                                                    >
-                                                                        Salvar
-                                                                    </button>
-                                                                </div>
-                                                            ) : (
-                                                                <button
-                                                                    ref={(el) => { rowFieldRefs.current.saldo = el; }}
-                                                                    onClick={handleIncluir}
-                                                                    onKeyDown={handleRowTab('saldo')}
-                                                                    style={{ ...headerBtnStyle, width: '100%', borderRadius: 0, background: '#00695c', color: '#fff', border: '1px solid #00695c', fontSize: '9px' }}
-                                                                >
-                                                                    Incluir todos os dados digitados
-                                                                </button>
-                                                            )
-                                                        ) : col.type === 'date' ? (
-                                                            <input type="date" style={quickInputStyle}
-                                                                ref={(el) => { rowFieldRefs.current[col.key] = el; }}
-                                                                value={formTx[col.key] || ''}
-                                                                onChange={(e) => handleQuick(col.key, e.target.value)}
-                                                                onBlur={() => handleQuickBlur()}
-                                                                onKeyDown={handleRowTab(col.key)} />
-                                                        ) : col.type === 'number' ? (
-                                                            <input type="text" inputMode="decimal" placeholder="0,00" style={{ ...quickInputStyle, textAlign: 'right' }}
-                                                                ref={(el) => { rowFieldRefs.current[col.key] = el; }}
-                                                                value={formTx[col.key] || ''}
-                                                                onChange={(e) => handleQuick(col.key, e.target.value)}
-                                                                onBlur={() => handleQuickBlur()}
-                                                                onKeyDown={handleRowTab(col.key)} />
-                                                        ) : col.type === 'combobox' ? (
-                                                            <div style={{ width: '100%', height: '36px' }}>
-                                                                <SearchableSelect
-                                                                    value={formTx[col.key]}
-                                                                    startOpen={false}
-                                                                    registerInput={(el) => { rowFieldRefs.current[col.key] = el; }}
-                                                                    onKeyDown={handleRowTab(col.key)}
-                                                                    onChange={(val) => handleQuick(col.key, val)}
-                                                                    options={col.options}
-                                                                    onBlur={(val) => handleQuickBlur(val !== undefined ? { [col.key]: val } : {})}
-                                                                    onOpenRegister={
-                                                                        col.key === 'beneficiary_id' ? (val) => {
-                                                                            const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
-                                                                            navigate(`/beneficiaries?returnTo=/transactions/${selectedAccount?.id}${q}`);
-                                                                        }
-                                                                        : col.key === 'cost_center_id' ? (val) => {
-                                                                            const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
-                                                                            navigate(`/cost-centers?returnTo=/transactions/${selectedAccount?.id}${q}`);
-                                                                        }
-                                                                        : col.key === 'transaction_type_id' ? (val) => {
-                                                                            const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
-                                                                            navigate(`/chart-of-accounts?returnTo=/transactions/${selectedAccount?.id}${q}`);
-                                                                        }
-                                                                        : undefined
-                                                                    }
-                                                                />
-                                                            </div>
-                                                        ) : (
-                                                            <input type="text" style={quickInputStyle}
-                                                                ref={(el) => { rowFieldRefs.current[col.key] = el; if (col.key === 'description') headerDescRef.current = el; }}
-                                                                placeholder={col.label + '...'}
-                                                                value={formTx[col.key] || ''}
-                                                                onChange={(e) => handleQuick(col.key, e.target.value)}
-                                                                onBlur={() => handleQuickBlur()}
-                                                                onKeyDown={handleRowTab(col.key)} />
-                                                        )}
-                                                    </th>
-                                                    );
-                                                })}
-                                            </tr>
-                                        );
-                                    })()}
                                 </thead>
                                 <tbody ref={tableRef}>
                                     <tr style={{ background: 'rgba(34, 197, 94, 0.25)', borderLeft: '4px solid #22c55e' }}>
@@ -2991,7 +2793,9 @@ const Transactions = () => {
                                                     {col.key === 'selection' ? (
                                                         <div
                                                             className={`selection-indicator ${selectedRowIds.has(t.id) ? 'checked' : ''}`}
+                                                            title="Clique para editar · Botão direito para excluir"
                                                             onClick={(e) => handleRowSelectionClick(e, t.id)}
+                                                            onContextMenu={(e) => handleRowContextMenu(e, t.id)}
                                                         />
                                                     ) : (
                                                         <>
@@ -3306,6 +3110,92 @@ const Transactions = () => {
                     </div>
                 </div>
             )}
+
+            {headerFormOpen && editingRowId && (() => {
+                const formTx = transactions.find(t => t.id === editingRowId);
+                if (!formTx) return null;
+                const formId = formTx.id;
+                const handleQuick = (field, value) => handleInputChange(formId, field, value);
+                const closeForm = () => { setEditingRowId(null); setHeaderFormOpen(false); };
+                const handleRastreio = () => {
+                    const amt = parseBRNum(formTx.debit) || parseBRNum(formTx.credit);
+                    if (!formTx.cost_center_id || !amt) {
+                        alert('Informe o Centro de Custo e o valor (Saída/Entrada) antes de rastrear.');
+                        return;
+                    }
+                    handleSave(formId, {}, true);
+                };
+                const handleSalvar = async () => {
+                    await handleSave(formId, {});
+                    closeForm();
+                };
+                const editFields = columns.filter(c => !['selection', 'sequential_id', 'cc_valor', 'saldo'].includes(c.key));
+                return (
+                    <div className="modal-overlay" onClick={closeForm} style={{ zIndex: 100000 }}>
+                        <div className="modal-box" onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 10, width: 420, maxWidth: '92vw', maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
+                            <div style={{ background: '#0d47a1', color: '#fff', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 'bold', fontSize: 13 }}>
+                                <span>Editar Lançamento #{formTx.sequential_id}</span>
+                                <button onClick={closeForm} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}>✕</button>
+                            </div>
+                            <div style={{ padding: 20, overflowY: 'auto' }}>
+                                {editFields.map(col => (
+                                    <div key={col.key} style={{ marginBottom: 14 }}>
+                                        <label style={{ display: 'block', fontSize: 11, fontWeight: 'bold', color: '#89962F', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{col.label}</label>
+                                        {col.type === 'date' ? (
+                                            <input type="date" style={editInputStyle}
+                                                value={formTx[col.key] || ''}
+                                                onChange={(e) => handleQuick(col.key, e.target.value)}
+                                                onBlur={() => handleSave(formId, {})} />
+                                        ) : col.type === 'number' ? (
+                                            <input type="text" inputMode="decimal" placeholder="0,00" style={editInputStyle}
+                                                value={formTx[col.key] || ''}
+                                                onChange={(e) => handleQuick(col.key, e.target.value)}
+                                                onBlur={() => handleSave(formId, {})} />
+                                        ) : col.type === 'combobox' ? (
+                                            <SearchableSelect
+                                                value={formTx[col.key]}
+                                                startOpen={false}
+                                                onChange={(val) => handleQuick(col.key, val)}
+                                                options={col.options}
+                                                onBlur={(val) => handleSave(formId, val !== undefined ? { [col.key]: val } : {})}
+                                                onOpenRegister={
+                                                    col.key === 'beneficiary_id' ? (val) => {
+                                                        const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
+                                                        navigate(`/beneficiaries?returnTo=/transactions/${selectedAccount?.id}${q}`);
+                                                    }
+                                                    : col.key === 'cost_center_id' ? (val) => {
+                                                        const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
+                                                        navigate(`/cost-centers?returnTo=/transactions/${selectedAccount?.id}${q}`);
+                                                    }
+                                                    : col.key === 'transaction_type_id' ? (val) => {
+                                                        const q = val ? `&prefill=${encodeURIComponent(val)}` : '';
+                                                        navigate(`/chart-of-accounts?returnTo=/transactions/${selectedAccount?.id}${q}`);
+                                                    }
+                                                    : undefined
+                                                }
+                                            />
+                                        ) : (
+                                            <input type="text" style={editInputStyle}
+                                                placeholder={col.label + '...'}
+                                                value={formTx[col.key] || ''}
+                                                onChange={(e) => handleQuick(col.key, e.target.value)}
+                                                onBlur={() => handleSave(formId, {})} />
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, padding: '0 20px 20px' }}>
+                                <button onClick={handleRastreio} style={{ flex: 1, background: '#1565c0', color: '#fff', border: 'none', borderRadius: 8, padding: 12, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}>
+                                    Rastreio
+                                </button>
+                                <button onClick={handleSalvar} style={{ flex: 2, background: '#CCFF00', color: '#0f172a', border: 'none', borderRadius: 8, padding: 12, fontWeight: 'bold', cursor: 'pointer', fontSize: 14 }}>
+                                    Salvar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {newTxModalOpen && selectedAccount && (
                 <NewTransactionModal
