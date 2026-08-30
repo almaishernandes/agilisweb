@@ -189,6 +189,11 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     };
 
     const handleConfirm = async () => {
+        if (values.dc_type !== 'T' && ccRemaining !== 0) {
+            alert('O restante a alocar do Centro de Custos precisa ser R$ 0,00.');
+            setStepIndex(STEPS.indexOf('costCenter'));
+            return;
+        }
         setSaving(true);
         try {
             const ctx = await getSecurityContext();
@@ -488,7 +493,13 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                     {!rateioPickerOpen ? (
                                         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                                             <button type="button" style={ov.secondaryBtn} onClick={() => setRateioPickerOpen(true)}>↗ Rateio</button>
-                                            <button style={ov.primaryBtn} onClick={advance}>Avançar</button>
+                                            <button
+                                                style={{ ...ov.primaryBtn, opacity: ccRemaining !== 0 ? 0.4 : 1 }}
+                                                onClick={() => {
+                                                    if (ccRemaining !== 0) { alert('O restante a alocar precisa ser R$ 0,00 antes de avançar.'); return; }
+                                                    advance();
+                                                }}
+                                            >Avançar</button>
                                         </div>
                                     ) : (
                                         <>
