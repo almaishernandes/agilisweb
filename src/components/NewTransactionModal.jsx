@@ -55,7 +55,11 @@ const EMPTY = {
     costCenterItems: [],    // [{ id, full_code, description, amount }]
     chartAccount: null,
     destinoAccount: null,
+    description: '',
 };
+
+const SpeechRecognitionAPI =
+    typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
 
 // Monta a sequência de passos de acordo com o tipo de lançamento:
 // - Transferência: fluxo curto (Valor → Tipo → Conta destino → Conferência).
@@ -65,7 +69,7 @@ function buildSteps(dcType, isCreditCard) {
     if (dcType === 'T') return ['amount', 'flowType', 'destinoAccount', 'review'];
     const steps = ['amount', 'flowType'];
     if (isCreditCard) steps.push('installments');
-    steps.push('beneficiary', 'costCenter', 'chartAccount', 'review');
+    steps.push('beneficiary', 'costCenter', 'chartAccount', 'description', 'review');
     return steps;
 }
 
@@ -89,6 +93,8 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     const [otherAccounts, setOtherAccounts] = useState([]);
     const [beneficiarySearch, setBeneficiarySearch] = useState('');
     const [rateioPickerOpen, setRateioPickerOpen] = useState(false);
+    const [listeningDescription, setListeningDescription] = useState(false);
+    const descriptionRecognitionRef = useRef(null);
 
     const amountRef = useRef(null);
     const installmentsRef = useRef(null);
@@ -116,6 +122,14 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
         if (step === 'amount') setTimeout(() => amountRef.current?.focus(), 50);
         if (step === 'installments' && !showInstallmentDetail) setTimeout(() => installmentsRef.current?.focus(), 50);
     }, [step, showInstallmentDetail]);
+
+    // Pré-preenche a Descrição com o nome do fornecedor ao chegar nessa
+    // etapa pela primeira vez — o usuário ainda pode ajustar antes de gravar.
+    useEffect(() => {
+        if (step === 'description' && !values.description && values.beneficiary?.name) {
+            setValues(v => ({ ...v, description: v.beneficiary?.name || '' }));
+        }
+    }, [step]);
 
     const advance = () => setStepIndex(i => Math.min(i + 1, STEPS.length - 1));
     const goBack = () => setStepIndex(i => Math.max(i - 1, 0));
@@ -245,7 +259,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                     account_id: account.id,
                     emission_date: today,
                     due_date: addMonths(dueBase, i),
-                    description: n > 1 ? `${values.beneficiary?.name || ''} (${i + 1}/${n})` : (values.beneficiary?.name || ''),
+                    description: n > 1 ? `${values.description || values.beneficiary?.name || ''} (${i + 1}/${n})` : (values.description || values.beneficiary?.name || ''),
                     amount: values.amount / n,
                     dc_type: values.dc_type,
                     type: values.type,
@@ -536,6 +550,44 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                         </Field>
                     )}
 
+                    {step === 'description' && (
+                        <Field label="Descrição do Lançamento">
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    style={ov.input}
+                                    value={values.description}
+                                    onChange={(e) => setValues(v => ({ ...v, description: e.target.value }))}
+                                    placeholder="Ex.: Compra de material de escritório"
+                                    autoFocus
+                                    onKeyDown={(e) => { if (e.key === 'Enter') advance(); }}
+                                />
+                                <button
+                                    type="button"
+                                    title="Ditar por voz"
+                                    disabled={listeningDescription}
+                                    onClick={() => {
+                                        if (!SpeechRecognitionAPI) { alert('Reconhecimento de voz não disponível neste navegador.'); return; }
+                                        const recognition = new SpeechRecognitionAPI();
+                                        recognition.lang = 'pt-BR';
+                                        recognition.continuous = false;
+                                        recognition.interimResults = false;
+                                        recognition.onresult = (event) => {
+                                            const text = event.results[0]?.[0]?.transcript || '';
+                                            if (text) setValues(v => ({ ...v, description: text }));
+                                        };
+                                        recognition.onend = () => setListeningDescription(false);
+                                        recognition.onerror = () => setListeningDescription(false);
+                                        descriptionRecognitionRef.current = recognition;
+                                        recognition.start();
+                                        setListeningDescription(true);
+                                    }}
+                                    style={{ ...ov.calcToggleBtn, background: listeningDescription ? '#CCFF00' : '#f1f5f9', color: '#334155' }}
+                                >🎤</button>
+                            </div>
+                            <button style={{ ...ov.primaryBtn, marginTop: 12, width: '100%' }} onClick={advance}>Avançar</button>
+                        </Field>
+                    )}
+
                     {step === 'review' && (
                         <>
                             <Field label="Conferência (clique em um campo para editar)">
@@ -561,6 +613,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                             ))
                                         )}
                                         <DoneRow label="Plano de Contas" value={values.chartAccount?.description || '—'} onEdit={() => setStepIndex(STEPS.indexOf('chartAccount'))} />
+                                        <DoneRow label="Descrição" value={values.description || '—'} onEdit={() => setStepIndex(STEPS.indexOf('description'))} />
                                     </>
                                 )}
                             </Field>
