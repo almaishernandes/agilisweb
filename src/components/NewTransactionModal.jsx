@@ -15,44 +15,102 @@ const fmtDateBR = (iso) => {
     return `${d}/${m}/${y}`;
 };
 
-const STEPS = ['amount', 'flowType', 'installments', 'beneficiary', 'costCenter', 'chartAccount', 'review'];
+// Vencimento padrão de fatura de Cartão de Crédito: emissão até o dia de
+// fechamento cai na fatura do mês seguinte; após o fechamento, cai na fatura
+// do segundo mês subsequente. Mesma regra usada no formulário de lançamentos.
+const calculateDueDate = (emissionDateStr, acc) => {
+    const type = (acc?.account_type || '').toLowerCase();
+    const isCC = type.includes('crédito') || type.includes('credito');
+    if (!isCC || !acc?.closing_day || !acc?.due_day) return emissionDateStr;
+
+    const [year, month, day] = emissionDateStr.split('-').map(Number);
+    const closingDay = Number(acc.closing_day);
+    const dueDay = Number(acc.due_day);
+
+    let targetMonth = month - 1; // 0-indexed
+    targetMonth += day <= closingDay ? 1 : 2;
+
+    const targetDate = new Date(year, targetMonth, dueDay);
+    const y = targetDate.getFullYear();
+    const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const d = String(targetDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const CALC_KEYS = [
+    ['7', '8', '9', '/'],
+    ['4', '5', '6', '*'],
+    ['1', '2', '3', '-'],
+    ['0', ',', '⌫', '+'],
+    ['C', '', '=', ''],
+];
 
 const EMPTY = {
     amount: '',
-    dc_type: 'D',
+    dc_type: 'D',       // 'D' Saída | 'C' Entrada | 'T' Transferência
     type: 'Expense',
     installments: '1',
     firstDueDate: todayISO(),
-    beneficiary: null, // { id, name } | { id: null, name: <novo> }
-    costCenter: null,
+    beneficiary: null,      // { id, name } | { id: null, name: <novo> }
+    costCenterItems: [],    // [{ id, full_code, description, amount }]
     chartAccount: null,
+    destinoAccount: null,
 };
 
+// Monta a sequência de passos de acordo com o tipo de lançamento:
+// - Transferência: fluxo curto (Valor → Tipo → Conta destino → Conferência).
+// - Saída/Entrada: fluxo completo; Parcelas só entra se a conta for de
+//   Cartão de Crédito (parcelamento só faz sentido nesse tipo de conta).
+function buildSteps(dcType, isCreditCard) {
+    if (dcType === 'T') return ['amount', 'flowType', 'destinoAccount', 'review'];
+    const steps = ['amount', 'flowType'];
+    if (isCreditCard) steps.push('installments');
+    steps.push('beneficiary', 'costCenter', 'chartAccount', 'review');
+    return steps;
+}
+
 // Mesma sequência de campos do Agilis Mobile (Digitação): Valor, Tipo,
-// Parcelas (com vencimento/parcelamento se >1), Fornecedor, Centro de
-// Custos, Plano de Contas, Conferência. A Conta já vem fixada (a página
-// atual), por isso não entra como passo aqui.
+// Parcelas (com vencimento/parcelamento se >1, só em Cartão de Crédito),
+// Fornecedor, Centro de Custos (com rateio), Plano de Contas, Conferência.
+// A Conta de origem já vem fixada (a página atual).
 export default function NewTransactionModal({ account, onClose, onCreated }) {
+    const isCreditCard = (account?.account_type || '').toLowerCase().includes('cart');
+
     const [stepIndex, setStepIndex] = useState(0);
     const [values, setValues] = useState(EMPTY);
     const [showInstallmentDetail, setShowInstallmentDetail] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [calcOpen, setCalcOpen] = useState(false);
+    const [calcDisplay, setCalcDisplay] = useState('');
 
     const [beneficiaries, setBeneficiaries] = useState([]);
     const [costCenters, setCostCenters] = useState([]);
     const [chartAccounts, setChartAccounts] = useState([]);
+    const [otherAccounts, setOtherAccounts] = useState([]);
     const [beneficiarySearch, setBeneficiarySearch] = useState('');
+    const [rateioPickerOpen, setRateioPickerOpen] = useState(false);
 
     const amountRef = useRef(null);
     const installmentsRef = useRef(null);
 
-    const step = STEPS[stepIndex];
+    const STEPS = buildSteps(values.dc_type, isCreditCard);
+    // Se o passo atual não existe mais na sequência recalculada (ex: trocou
+    // de Saída para Transferência depois de já ter avançado), volta ao início.
+    const step = STEPS[stepIndex] || STEPS[0];
 
     useEffect(() => {
         supabase.from('beneficiaries').select('id, name').order('name').then(({ data }) => setBeneficiaries(data || []));
         supabase.from('cost_centers').select('id, full_code, description').order('full_code').then(({ data }) => setCostCenters(data || []));
         supabase.from('chart_of_accounts').select('id, code, description').order('code').then(({ data }) => setChartAccounts(data || []));
-    }, []);
+        getSecurityContext().then(ctx => {
+            if (!ctx?.family_id) return;
+            supabase.from('accounts').select('id, name, account_type').eq('family_id', ctx.family_id).neq('id', account.id).order('name')
+                .then(({ data }) => setOtherAccounts(data || []));
+        });
+        // Vencimento padrão já vem calculado (fatura do mês seguinte à emissão),
+        // mesmo para 1 parcela só — o usuário pode ajustar se precisar.
+        setValues(v => ({ ...v, firstDueDate: calculateDueDate(todayISO(), account) }));
+    }, [account.id]);
 
     useEffect(() => {
         if (step === 'amount') setTimeout(() => amountRef.current?.focus(), 50);
@@ -62,22 +120,39 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     const advance = () => setStepIndex(i => Math.min(i + 1, STEPS.length - 1));
     const goBack = () => setStepIndex(i => Math.max(i - 1, 0));
 
+    const amountNumber = () => parseFloat(String(values.amount).replace(',', '.')) || 0;
+
     const handleAmountSubmit = () => {
-        const n = parseFloat(String(values.amount).replace(',', '.'));
+        const n = amountNumber();
         if (!n || n <= 0) return;
         setValues(v => ({ ...v, amount: n }));
         advance();
     };
 
+    // ── Calculadora (mesmo teclado/lógica usada no resto do app) ───────────
+    const calcPress = (key) => {
+        if (key === 'C') { setCalcDisplay(''); return; }
+        if (key === '⌫') { setCalcDisplay(d => d.slice(0, -1)); return; }
+        if (key === '=') {
+            try {
+                const safeExpr = calcDisplay.replace(/,/g, '.').replace(/[^0-9+\-*/.()]/g, '');
+                // eslint-disable-next-line no-new-func
+                const result = Function('"use strict"; return (' + safeExpr + ')')();
+                const rounded = Math.round(result * 100) / 100;
+                setCalcDisplay(String(rounded));
+                setValues(v => ({ ...v, amount: rounded }));
+            } catch { /* ignora expressão inválida */ }
+            return;
+        }
+        setCalcDisplay(d => d + key);
+    };
+
     const handleInstallmentsSubmit = () => {
         const n = Math.max(1, Math.round(parseFloat(String(values.installments).replace(',', '.')) || 1));
         setValues(v => ({ ...v, installments: n }));
-        if (n > 1) {
-            setValues(v => ({ ...v, firstDueDate: todayISO() }));
-            setShowInstallmentDetail(true);
-        } else {
-            advance();
-        }
+        // Sempre pede o vencimento (mesmo com 1 parcela só — normalmente é o
+        // vencimento da fatura no mês subsequente à emissão, já pré-preenchido).
+        setShowInstallmentDetail(true);
     };
 
     const filteredBeneficiaries = beneficiaries.filter(b =>
@@ -95,14 +170,70 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
         return created?.id || null;
     };
 
+    // ── Centro de Custos / Rateio ───────────────────────────────────────────
+    const ccAllocated = values.costCenterItems.reduce((s, it) => s + Number(it.amount || 0), 0);
+    const ccRemaining = Math.round((amountNumber() - ccAllocated) * 100) / 100;
+
+    const pickFirstCostCenter = (cc) => {
+        setValues(v => ({ ...v, costCenterItems: [{ ...cc, amount: amountNumber() }] }));
+    };
+    const pickRateioCostCenter = (cc) => {
+        setValues(v => ({ ...v, costCenterItems: [...v.costCenterItems, { ...cc, amount: ccRemaining }] }));
+        setRateioPickerOpen(false);
+    };
+    const updateCcAmount = (idx, amount) => {
+        setValues(v => ({ ...v, costCenterItems: v.costCenterItems.map((it, i) => i === idx ? { ...it, amount } : it) }));
+    };
+    const removeCcItem = (idx) => {
+        setValues(v => ({ ...v, costCenterItems: v.costCenterItems.filter((_, i) => i !== idx) }));
+    };
+
     const handleConfirm = async () => {
         setSaving(true);
         try {
             const ctx = await getSecurityContext();
+            const today = todayISO();
+
+            // ── Transferência entre contas ──────────────────────────────────
+            if (values.dc_type === 'T') {
+                if (!values.destinoAccount) throw new Error('Selecione a conta de destino.');
+                const rows = [
+                    {
+                        account_id: account.id,
+                        emission_date: today,
+                        due_date: today,
+                        description: `Transferência (Transf.Conta ${values.destinoAccount.name})`,
+                        amount: values.amount,
+                        dc_type: 'D',
+                        type: 'Expense',
+                        user_id: ctx?.user_id ?? null,
+                        family_id: ctx?.family_id ?? null,
+                    },
+                    {
+                        account_id: values.destinoAccount.id,
+                        emission_date: today,
+                        due_date: today,
+                        description: `Transferência (Transf.Conta ${account.name})`,
+                        amount: values.amount,
+                        dc_type: 'C',
+                        type: 'Income',
+                        user_id: ctx?.user_id ?? null,
+                        family_id: ctx?.family_id ?? null,
+                    },
+                ];
+                const { error } = await supabase.from('transactions').insert(rows);
+                if (error) throw error;
+                onCreated?.();
+                onClose();
+                return;
+            }
+
+            // ── Saída / Entrada ──────────────────────────────────────────────
             const beneficiaryId = await resolveBeneficiaryId();
             const n = Number(values.installments) || 1;
-            const today = todayISO();
-            const dueBase = n > 1 ? values.firstDueDate : today;
+            const dueBase = values.firstDueDate || today;
+            const singleCc = values.costCenterItems.length === 1 ? values.costCenterItems[0].id : null;
+
             const rows = [];
             for (let i = 0; i < n; i++) {
                 rows.push({
@@ -114,14 +245,40 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                     dc_type: values.dc_type,
                     type: values.type,
                     beneficiary_id: beneficiaryId,
-                    cost_center_id: values.costCenter?.id ?? null,
+                    cost_center_id: singleCc,
                     transaction_type_id: values.chartAccount?.id ?? null,
                     user_id: ctx?.user_id ?? null,
                     family_id: ctx?.family_id ?? null,
                 });
             }
-            const { error } = await supabase.from('transactions').insert(rows);
+            const { data: inserted, error } = await supabase.from('transactions').insert(rows).select('id, amount');
             if (error) throw error;
+
+            // Rateio (mais de um Centro de Custos): replica a mesma proporção
+            // digitada em cada parcela gerada — mesmo modelo usado no resto do
+            // app (transaction_items), com cost_center_id nulo na transação.
+            if (values.costCenterItems.length > 1 && inserted?.length) {
+                const total = values.amount;
+                const proporcoes = values.costCenterItems.map(it => ({
+                    cost_center_id: it.id,
+                    description: it.full_code ? `${it.full_code} - ${it.description}` : it.description,
+                    ratio: Number(it.amount || 0) / total,
+                }));
+                const itemRows = [];
+                inserted.forEach(row => {
+                    proporcoes.forEach(p => {
+                        itemRows.push({
+                            transaction_id: row.id,
+                            cost_center_id: p.cost_center_id,
+                            description: p.description,
+                            amount: Math.round(row.amount * p.ratio * 100) / 100,
+                        });
+                    });
+                });
+                const { error: itemsError } = await supabase.from('transaction_items').insert(itemRows);
+                if (itemsError) throw itemsError;
+            }
+
             onCreated?.();
             onClose();
         } catch (err) {
@@ -142,31 +299,60 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                 <div style={ov.body}>
                     {step !== 'review' && (
                         <div style={ov.doneList}>
-                            {stepIndex > 0 && <DoneRow label="Valor" value={fmtBRL(values.amount)} />}
-                            {stepIndex > 1 && <DoneRow label="Tipo" value={values.dc_type === 'C' ? 'Entrada' : 'Saída'} />}
-                            {stepIndex > 2 && <DoneRow label="Parcelas" value={`${values.installments}x`} />}
-                            {stepIndex > 3 && <DoneRow label="Fornecedor" value={values.beneficiary?.name || '—'} />}
-                            {stepIndex > 4 && <DoneRow label="Centro de Custos" value={values.costCenter?.description || '—'} />}
-                            {stepIndex > 5 && <DoneRow label="Plano de Contas" value={values.chartAccount?.description || '—'} />}
+                            {STEPS.slice(0, stepIndex).includes('amount') && <DoneRow label="Valor" value={fmtBRL(values.amount)} />}
+                            {STEPS.slice(0, stepIndex).includes('flowType') && <DoneRow label="Tipo" value={values.dc_type === 'C' ? 'Entrada' : values.dc_type === 'T' ? 'Transferência' : 'Saída'} />}
+                            {STEPS.slice(0, stepIndex).includes('installments') && <DoneRow label="Parcelas" value={`${values.installments}x`} />}
+                            {STEPS.slice(0, stepIndex).includes('destinoAccount') && <DoneRow label="Conta Destino" value={values.destinoAccount?.name || '—'} />}
+                            {STEPS.slice(0, stepIndex).includes('beneficiary') && <DoneRow label="Fornecedor" value={values.beneficiary?.name || '—'} />}
+                            {STEPS.slice(0, stepIndex).includes('costCenter') && <DoneRow label="Centro de Custos" value={values.costCenterItems.length > 1 ? `${values.costCenterItems.length} (rateio)` : (values.costCenterItems[0]?.description || '—')} />}
                         </div>
                     )}
 
                     {step === 'amount' && (
                         <Field label="Valor (R$)">
-                            <input
-                                ref={amountRef}
-                                style={ov.input}
-                                value={values.amount}
-                                onChange={e => setValues(v => ({ ...v, amount: e.target.value }))}
-                                onKeyDown={e => e.key === 'Enter' && handleAmountSubmit()}
-                                placeholder="0,00"
-                                inputMode="decimal"
-                            />
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    ref={amountRef}
+                                    style={ov.input}
+                                    value={values.amount}
+                                    onChange={e => setValues(v => ({ ...v, amount: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleAmountSubmit()}
+                                    placeholder="0,00"
+                                    inputMode="decimal"
+                                />
+                                <button
+                                    type="button"
+                                    title="Calculadora"
+                                    onClick={() => { setCalcDisplay(String(values.amount || '')); setCalcOpen(o => !o); }}
+                                    style={{ ...ov.calcToggleBtn, background: calcOpen ? '#0f172a' : '#f1f5f9', color: calcOpen ? '#f1f5f9' : '#334155' }}
+                                >
+                                    🧮
+                                </button>
+                            </div>
+
+                            {calcOpen && (
+                                <div style={ov.calcBox}>
+                                    <div style={ov.calcDisplay}>{calcDisplay || '0'}</div>
+                                    {CALC_KEYS.map((row, ri) => (
+                                        <div key={ri} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                                            {row.map((k, ki) => k === '' ? (
+                                                <div key={ki} style={{ flex: 1 }} />
+                                            ) : k === '=' ? (
+                                                <button key={ki} type="button" onClick={() => calcPress(k)} style={{ ...ov.calcKey, flex: 2, background: '#16a34a', color: '#fff' }}>✓</button>
+                                            ) : (
+                                                <button key={ki} type="button" onClick={() => calcPress(k)} style={{ ...ov.calcKey, background: ['C', '⌫', '/', '*', '-', '+'].includes(k) ? '#475569' : '#334155', color: k === 'C' ? '#fca5a5' : '#f1f5f9' }}>{k}</button>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <button style={{ ...ov.primaryBtn, marginTop: 12, width: '100%' }} onClick={handleAmountSubmit}>Avançar</button>
                         </Field>
                     )}
 
                     {step === 'flowType' && (
-                        <Field label="Saída ou Entrada?">
+                        <Field label="Tipo de Lançamento">
                             <div style={{ display: 'flex', gap: 10 }}>
                                 <button
                                     style={{ ...ov.flowBtn, background: 'rgba(239,68,68,0.1)', borderColor: '#ef4444' }}
@@ -176,6 +362,24 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                     style={{ ...ov.flowBtn, background: 'rgba(34,197,94,0.1)', borderColor: '#22c55e' }}
                                     onClick={() => { setValues(v => ({ ...v, dc_type: 'C', type: 'Income' })); advance(); }}
                                 >↑ Entrada</button>
+                                <button
+                                    style={{ ...ov.flowBtn, background: 'rgba(21,101,192,0.1)', borderColor: '#1565c0' }}
+                                    onClick={() => { setValues(v => ({ ...v, dc_type: 'T', type: 'Transfer' })); setStepIndex(2); }}
+                                >⇄ Transferência</button>
+                            </div>
+                        </Field>
+                    )}
+
+                    {step === 'destinoAccount' && (
+                        <Field label="Conta de Destino">
+                            <div style={ov.pickList}>
+                                {otherAccounts.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Nenhuma outra conta cadastrada.</div>}
+                                {otherAccounts.map(acc => (
+                                    <div key={acc.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, destinoAccount: acc })); advance(); }}>
+                                        <strong>{acc.name}</strong>
+                                        <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>{acc.account_type}</span>
+                                    </div>
+                                ))}
                             </div>
                         </Field>
                     )}
@@ -190,12 +394,13 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                 onKeyDown={e => e.key === 'Enter' && handleInstallmentsSubmit()}
                                 inputMode="numeric"
                             />
+                            <button style={{ ...ov.primaryBtn, marginTop: 12, width: '100%' }} onClick={handleInstallmentsSubmit}>Avançar</button>
                         </Field>
                     )}
 
                     {step === 'installments' && showInstallmentDetail && (
                         <>
-                            <Field label="Vencimento da 1ª parcela">
+                            <Field label={Number(values.installments) > 1 ? 'Vencimento da 1ª Parcela' : 'Vencimento'}>
                                 <input
                                     type="date"
                                     style={ov.input}
@@ -203,17 +408,19 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                     onChange={e => setValues(v => ({ ...v, firstDueDate: e.target.value }))}
                                 />
                             </Field>
-                            <Field label="Parcelamento">
-                                <div style={ov.installmentList}>
-                                    {Array.from({ length: Number(values.installments) }, (_, i) => (
-                                        <div key={i} style={ov.installmentRow}>
-                                            <span style={{ color: '#89962F', fontWeight: 'bold', width: 50 }}>{i + 1}/{values.installments}</span>
-                                            <span style={{ flex: 1 }}>{fmtDateBR(addMonths(values.firstDueDate, i))}</span>
-                                            <span style={{ fontWeight: 'bold', color: '#00695c' }}>{fmtBRL(values.amount / values.installments)}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </Field>
+                            {Number(values.installments) > 1 && (
+                                <Field label="Parcelamento">
+                                    <div style={ov.installmentList}>
+                                        {Array.from({ length: Number(values.installments) }, (_, i) => (
+                                            <div key={i} style={ov.installmentRow}>
+                                                <span style={{ color: '#89962F', fontWeight: 'bold', width: 50 }}>{i + 1}/{values.installments}</span>
+                                                <span style={{ flex: 1 }}>{fmtDateBR(addMonths(values.firstDueDate, i))}</span>
+                                                <span style={{ fontWeight: 'bold', color: '#00695c' }}>{fmtBRL(values.amount / values.installments)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Field>
+                            )}
                             <button style={ov.primaryBtn} onClick={() => { setShowInstallmentDetail(false); advance(); }}>Continuar</button>
                         </>
                     )}
@@ -247,13 +454,62 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
 
                     {step === 'costCenter' && (
                         <Field label="Centro de Custos">
-                            <div style={ov.pickList}>
-                                {costCenters.map(cc => (
-                                    <div key={cc.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, costCenter: cc })); advance(); }}>
-                                        {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
+                            {values.costCenterItems.length === 0 ? (
+                                <div style={ov.pickList}>
+                                    {costCenters.map(cc => (
+                                        <div key={cc.id} style={ov.pickRow} onClick={() => pickFirstCostCenter(cc)}>
+                                            {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={ov.installmentList}>
+                                        {values.costCenterItems.map((it, idx) => (
+                                            <div key={idx} style={{ ...ov.installmentRow, alignItems: 'center' }}>
+                                                <span style={{ flex: 1 }}>{it.full_code ? `${it.full_code} - ` : ''}{it.description}</span>
+                                                <input
+                                                    style={ov.ccAmountInput}
+                                                    value={it.amount}
+                                                    onChange={e => updateCcAmount(idx, e.target.value)}
+                                                    inputMode="decimal"
+                                                />
+                                                {values.costCenterItems.length > 1 && (
+                                                    <button type="button" onClick={() => removeCcItem(idx)} style={ov.removeBtn}>✕</button>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', fontSize: 12, color: ccRemaining === 0 ? '#2e7d32' : '#e65100', fontWeight: 'bold' }}>
+                                        <span>Restante a alocar</span>
+                                        <span>{fmtBRL(ccRemaining)}</span>
+                                    </div>
+
+                                    {!rateioPickerOpen ? (
+                                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                            <button type="button" style={ov.secondaryBtn} onClick={() => setRateioPickerOpen(true)}>↗ Rateio</button>
+                                            <button style={ov.primaryBtn} onClick={advance}>Avançar</button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* "Tela de rateio" fica aberta logo abaixo, dentro do próprio modal */}
+                                            <div style={ov.rateioPanel}>
+                                                <div style={{ fontSize: 11, fontWeight: 'bold', color: '#1565c0', marginBottom: 6 }}>
+                                                    SELECIONE OUTRO CENTRO DE CUSTOS PARA RATEAR
+                                                </div>
+                                                <div style={ov.pickList}>
+                                                    {costCenters.filter(cc => !values.costCenterItems.some(it => it.id === cc.id)).map(cc => (
+                                                        <div key={cc.id} style={ov.pickRow} onClick={() => pickRateioCostCenter(cc)}>
+                                                            {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <button type="button" style={{ ...ov.secondaryBtn, marginTop: 8, width: '100%' }} onClick={() => setRateioPickerOpen(false)}>Fechar</button>
+                                            </div>
+                                        </>
+                                    )}
+                                </>
+                            )}
                         </Field>
                     )}
 
@@ -271,19 +527,34 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
 
                     {step === 'review' && (
                         <>
-                            <Field label="Conferência">
+                            <Field label="Conferência (clique em um campo para editar)">
                                 <DoneRow label="Data" value={fmtDateBR(todayISO())} />
-                                <DoneRow label="Valor" value={fmtBRL(values.amount)} />
-                                <DoneRow label="Tipo" value={values.dc_type === 'C' ? 'Entrada' : 'Saída'} />
-                                <DoneRow label="Parcelas" value={`${values.installments}x`} />
-                                {Number(values.installments) > 1 && <DoneRow label="1º Vencimento" value={fmtDateBR(values.firstDueDate)} />}
-                                <DoneRow label="Conta" value={account.name} />
-                                <DoneRow label="Fornecedor" value={values.beneficiary?.name || '—'} />
-                                <DoneRow label="Centro de Custos" value={values.costCenter?.description || '—'} />
-                                <DoneRow label="Plano de Contas" value={values.chartAccount?.description || '—'} />
+                                <DoneRow label="Valor" value={fmtBRL(values.amount)} onEdit={() => setStepIndex(STEPS.indexOf('amount'))} />
+                                <DoneRow label="Tipo" value={values.dc_type === 'C' ? 'Entrada' : values.dc_type === 'T' ? 'Transferência' : 'Saída'} onEdit={() => setStepIndex(STEPS.indexOf('flowType'))} />
+                                {values.dc_type === 'T' ? (
+                                    <>
+                                        <DoneRow label="Conta Origem" value={account.name} />
+                                        <DoneRow label="Conta Destino" value={values.destinoAccount?.name || '—'} onEdit={() => setStepIndex(STEPS.indexOf('destinoAccount'))} />
+                                    </>
+                                ) : (
+                                    <>
+                                        <DoneRow label="Parcelas" value={`${values.installments}x`} onEdit={() => { setShowInstallmentDetail(false); setStepIndex(STEPS.indexOf('installments')); }} />
+                                        <DoneRow label={Number(values.installments) > 1 ? '1º Vencimento' : 'Vencimento'} value={fmtDateBR(values.firstDueDate)} onEdit={() => { setShowInstallmentDetail(true); setStepIndex(STEPS.indexOf('installments')); }} />
+                                        <DoneRow label="Conta" value={account.name} />
+                                        <DoneRow label="Fornecedor" value={values.beneficiary?.name || '—'} onEdit={() => setStepIndex(STEPS.indexOf('beneficiary'))} />
+                                        {values.costCenterItems.length <= 1 ? (
+                                            <DoneRow label="Centro de Custos" value={values.costCenterItems[0]?.description || '—'} onEdit={() => setStepIndex(STEPS.indexOf('costCenter'))} />
+                                        ) : (
+                                            values.costCenterItems.map((it, idx) => (
+                                                <DoneRow key={idx} label={`↳ ${it.description}`} value={fmtBRL(it.amount)} onEdit={() => setStepIndex(STEPS.indexOf('costCenter'))} />
+                                            ))
+                                        )}
+                                        <DoneRow label="Plano de Contas" value={values.chartAccount?.description || '—'} onEdit={() => setStepIndex(STEPS.indexOf('chartAccount'))} />
+                                    </>
+                                )}
                             </Field>
                             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                                <button style={ov.secondaryBtn} onClick={goBack} disabled={saving}>‹ Voltar</button>
+                                <button style={ov.secondaryBtn} onClick={goBack} disabled={saving}>‹ Voltar e Editar</button>
                                 <button style={ov.primaryBtn} onClick={handleConfirm} disabled={saving}>
                                     {saving ? 'Gravando...' : 'Gravar'}
                                 </button>
@@ -305,11 +576,23 @@ function Field({ label, children }) {
     );
 }
 
-function DoneRow({ label, value }) {
+function DoneRow({ label, value, onEdit }) {
     return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #eee', fontSize: 13 }}>
+        <div
+            onClick={onEdit}
+            style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 4px',
+                borderBottom: '1px solid #eee', fontSize: 13,
+                cursor: onEdit ? 'pointer' : 'default', borderRadius: 4,
+            }}
+            onMouseEnter={e => { if (onEdit) e.currentTarget.style.background = '#f5f5f5'; }}
+            onMouseLeave={e => { if (onEdit) e.currentTarget.style.background = 'transparent'; }}
+        >
             <span style={{ color: '#888' }}>{label}</span>
-            <span style={{ fontWeight: 'bold', color: '#222' }}>{value}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 'bold', color: '#222' }}>{value}</span>
+                {onEdit && <span style={{ color: '#1565c0', fontSize: 12 }}>✎</span>}
+            </span>
         </div>
     );
 }
@@ -321,12 +604,19 @@ const ov = {
     closeBtn: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' },
     body: { padding: 20, overflowY: 'auto' },
     doneList: { marginBottom: 12 },
-    input: { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 15, boxSizing: 'border-box' },
-    flowBtn: { flex: 1, padding: '16px', borderRadius: 8, border: '1px solid', fontWeight: 'bold', cursor: 'pointer', fontSize: 14 },
+    input: { flex: 1, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 15, boxSizing: 'border-box' },
+    flowBtn: { flex: 1, padding: '16px 8px', borderRadius: 8, border: '1px solid', fontWeight: 'bold', cursor: 'pointer', fontSize: 13 },
     primaryBtn: { flex: 1, background: '#CCFF00', color: '#0f172a', border: 'none', borderRadius: 8, padding: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: 14 },
     secondaryBtn: { flex: 1, background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', borderRadius: 8, padding: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: 14 },
     pickList: { maxHeight: 260, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, marginTop: 8 },
     pickRow: { padding: '10px 12px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', fontSize: 13 },
     installmentList: { border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' },
-    installmentRow: { display: 'flex', padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontSize: 13 },
+    installmentRow: { display: 'flex', padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontSize: 13, gap: 8 },
+    ccAmountInput: { width: 90, padding: '4px 6px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 12, textAlign: 'right' },
+    removeBtn: { background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' },
+    rateioPanel: { marginTop: 10, padding: 10, background: '#e3f2fd', borderRadius: 8, border: '1px solid #90caf9' },
+    calcToggleBtn: { width: 44, borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 18, cursor: 'pointer' },
+    calcBox: { marginTop: 8, background: '#1e293b', borderRadius: 8, padding: 10 },
+    calcDisplay: { background: '#0f172a', borderRadius: 4, padding: '6px 10px', marginBottom: 8, textAlign: 'right', fontSize: 18, fontWeight: 'bold', color: '#f1f5f9', minHeight: 32, letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    calcKey: { flex: 1, padding: '9px 0', border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer' },
 };

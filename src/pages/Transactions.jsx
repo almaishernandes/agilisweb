@@ -2573,7 +2573,6 @@ const Transactions = () => {
                                                         title="Novo lançamento"
                                                         style={{ height: '36px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#0d47a1', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: 11 }}
                                                     >
-                                                        <span style={{ fontSize: 18, lineHeight: 1 }}>+</span>
                                                         <span>NOVO LANÇAMENTO</span>
                                                     </button>
                                                 ) : col.key === 'sequential_id' ? (
@@ -2732,6 +2731,7 @@ const Transactions = () => {
                                                 fontWeight: 'bold',
                                                 color: '#5d4037',
                                                 textAlign: col.align || 'left',
+                                                textTransform: 'uppercase',
                                             }}>
                                                 <div style={{ display: 'flex', justifyContent: col.align === 'right' ? 'flex-end' : 'space-between', alignItems: 'center' }}>
                                                     {col.key === 'selection' ? (
@@ -2746,24 +2746,28 @@ const Transactions = () => {
                                     </tr>
                                 </thead>
                                 <tbody ref={tableRef}>
-                                    <tr style={{ background: 'rgba(34, 197, 94, 0.25)', borderLeft: '4px solid #22c55e' }}>
-                                        <td colSpan={columns.length} style={{
-                                            padding: '4px 10px',
-                                            fontSize: '11px',
-                                            fontWeight: 'bold',
-                                            color: '#333',
-                                            borderBottom: '2px solid #ddd',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.05em'
-                                        }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span>SALDO ANTERIOR NO PERÍODO</span>
-                                                <span style={{ color: saldoAnterior < 0 ? '#c62828' : '#2e7d32', fontSize: '12px', display: 'flex', alignItems: 'center' }}>
-                                                    {saldoAnterior === 0 ? '-' : Math.abs(saldoAnterior).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    {saldoAnterior !== 0 && <span className={`badge-cd ${saldoAnterior >= 0 ? 'badge-c' : 'badge-d'}`}>{saldoAnterior >= 0 ? 'C' : 'D'}</span>}
-                                                </span>
-                                            </div>
-                                        </td>
+                                    <tr style={{ background: '#CCFF00', borderLeft: '4px solid #22c55e' }}>
+                                        {columns.map(col => (
+                                            <td key={col.key} style={{
+                                                width: col.width,
+                                                padding: '4px 10px',
+                                                fontSize: '11px',
+                                                fontWeight: 'bold',
+                                                color: '#5d4037',
+                                                borderBottom: '2px solid #ddd',
+                                                textAlign: col.key === 'saldo' ? 'right' : 'left',
+                                                whiteSpace: 'nowrap',
+                                            }}>
+                                                {col.key === 'transaction_type_id' ? (
+                                                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>SALDO ANTERIOR NO PERÍODO</span>
+                                                ) : col.key === 'saldo' ? (
+                                                    <span style={{ color: saldoAnterior < 0 ? '#c62828' : '#2e7d32', fontSize: '12px', display: 'inline-flex', alignItems: 'center' }}>
+                                                        {saldoAnterior === 0 ? '-' : Math.abs(saldoAnterior).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                        {saldoAnterior !== 0 && <span className={`badge-cd ${saldoAnterior >= 0 ? 'badge-c' : 'badge-d'}`}>{saldoAnterior >= 0 ? 'C' : 'D'}</span>}
+                                                    </span>
+                                                ) : null}
+                                            </td>
+                                        ))}
                                     </tr>
                                     {sortedTransactions.map((t) => {
                                         const tRateioItems = rateioItemsMap[t.id] || [];
