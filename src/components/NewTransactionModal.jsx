@@ -329,7 +329,18 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                             {STEPS.slice(0, stepIndex).includes('installments') && <DoneRow label="Parcelas" value={`${values.installments}x`} />}
                             {STEPS.slice(0, stepIndex).includes('destinoAccount') && <DoneRow label="Conta Destino" value={values.destinoAccount?.name || '—'} />}
                             {STEPS.slice(0, stepIndex).includes('beneficiary') && <DoneRow label="Fornecedor" value={values.beneficiary?.name || '—'} />}
-                            {STEPS.slice(0, stepIndex).includes('costCenter') && <DoneRow label="Centro de Custos" value={values.costCenterItems.length > 1 ? `${values.costCenterItems.length} (rateio)` : (values.costCenterItems[0]?.description || '—')} />}
+                            {STEPS.slice(0, stepIndex).includes('costCenter') && (
+                                values.costCenterItems.length > 1 ? (
+                                    <>
+                                        <DoneRow label="Centro de Custos" value={`${values.costCenterItems.length} (rateio)`} onEdit={() => setStepIndex(STEPS.indexOf('costCenter'))} />
+                                        {values.costCenterItems.map((it, idx) => (
+                                            <DoneRow key={idx} label={`↳ ${it.description}`} value={fmtBRL(it.amount)} onEdit={() => setStepIndex(STEPS.indexOf('costCenter'))} />
+                                        ))}
+                                    </>
+                                ) : (
+                                    <DoneRow label="Centro de Custos" value={values.costCenterItems[0]?.description || '—'} onEdit={() => setStepIndex(STEPS.indexOf('costCenter'))} />
+                                )
+                            )}
                         </div>
                     )}
 
