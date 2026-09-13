@@ -93,6 +93,10 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
     // Nome do fornecedor que o usuário acabou de cadastrar em outra tela —
     // assim que a lista de fornecedores recarregar, seleciona automaticamente.
     const pendingBeneficiaryNameRef = useRef(resumeState?.pendingBeneficiaryName || null);
+    // Idem para Centro de Custos — pendingCostCenterForRateio diz se o item
+    // deve entrar como o primeiro CC ou como mais uma linha de rateio.
+    const pendingCostCenterNameRef = useRef(resumeState?.pendingCostCenterName || null);
+    const pendingCostCenterForRateioRef = useRef(!!resumeState?.pendingCostCenterForRateio);
     const [saving, setSaving] = useState(false);
     // calcTarget: null | 'amount' | { cc: idx } — identifica onde o resultado
     // da calculadora deve ser escrito (Valor geral ou o valor de um item de rateio).
@@ -105,6 +109,8 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
     const [otherAccounts, setOtherAccounts] = useState([]);
     const [beneficiarySearch, setBeneficiarySearch] = useState(() => resumeState?.pendingBeneficiaryName || '');
     const [chartAccountSearch, setChartAccountSearch] = useState('');
+    const [costCenterSearch, setCostCenterSearch] = useState(() => (!resumeState?.pendingCostCenterForRateio && resumeState?.pendingCostCenterName) || '');
+    const [rateioCostCenterSearch, setRateioCostCenterSearch] = useState('');
     const [rateioPickerOpen, setRateioPickerOpen] = useState(false);
     const [listeningDescription, setListeningDescription] = useState(false);
     const descriptionRecognitionRef = useRef(null);
@@ -146,6 +152,19 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
             advance();
         }
     }, [beneficiaries]);
+
+    // Idem para Centro de Custos: entra como primeiro CC ou como mais uma
+    // linha de rateio, conforme de onde o usuário saiu para cadastrar.
+    useEffect(() => {
+        if (!pendingCostCenterNameRef.current || costCenters.length === 0) return;
+        const match = costCenters.find(cc => cc.description.toLowerCase() === pendingCostCenterNameRef.current.trim().toLowerCase());
+        if (match) {
+            const forRateio = pendingCostCenterForRateioRef.current;
+            pendingCostCenterNameRef.current = null;
+            pendingCostCenterForRateioRef.current = false;
+            if (forRateio) pickRateioCostCenter(match); else pickFirstCostCenter(match);
+        }
+    }, [costCenters]);
 
     useEffect(() => {
         if (step === 'amount') setTimeout(() => amountRef.current?.focus(), 50);
@@ -240,6 +259,29 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
         if (!q) return true;
         return coa.description.toLowerCase().includes(q) || (coa.code || '').toLowerCase().includes(q);
     });
+
+    const matchCostCenter = (cc, q) => cc.description.toLowerCase().includes(q) || (cc.full_code || '').toLowerCase().includes(q);
+    const filteredCostCenters = costCenters.filter(cc => !costCenterSearch.trim() || matchCostCenter(cc, costCenterSearch.trim().toLowerCase()));
+    const exactCostCenterMatch = costCenters.some(cc => cc.description.toLowerCase() === costCenterSearch.trim().toLowerCase());
+
+    const availableRateioCostCenters = costCenters.filter(cc => !values.costCenterItems.some(it => it.id === cc.id));
+    const filteredRateioCostCenters = availableRateioCostCenters.filter(cc => !rateioCostCenterSearch.trim() || matchCostCenter(cc, rateioCostCenterSearch.trim().toLowerCase()));
+    const exactRateioCostCenterMatch = availableRateioCostCenters.some(cc => cc.description.toLowerCase() === rateioCostCenterSearch.trim().toLowerCase());
+
+    // Guarda o lançamento em andamento e manda para o cadastro completo de
+    // Centro de Custos; ao voltar, o efeito abaixo seleciona o recém-criado.
+    const handleGoRegisterCostCenter = (forRateio) => {
+        const name = (forRateio ? rateioCostCenterSearch : costCenterSearch).trim();
+        if (!name) return;
+        sessionStorage.setItem(NEW_TX_RESUME_KEY, JSON.stringify({
+            accountId: account.id,
+            stepIndex,
+            values,
+            pendingCostCenterName: name,
+            pendingCostCenterForRateio: !!forRateio,
+        }));
+        navigate(`/cost-centers?returnTo=/transactions/${account.id}&prefill=${encodeURIComponent(name)}`);
+    };
 
     const resolveBeneficiaryId = async () => {
         if (values.beneficiary?.id) return values.beneficiary.id;
@@ -522,18 +564,7 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                             />
                             <div style={ov.pickList}>
                                 {beneficiarySearch.trim() && !exactBeneficiaryMatch && (
-                                    <div style={{ padding: '12px 14px', background: '#fff8e1', borderBottom: '1px solid #f0f0f0' }}>
-                                        <div style={{ fontSize: 12, color: '#795548', marginBottom: 6 }}>
-                                            Esse fornecedor ainda não está no cadastro.
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={handleGoRegisterBeneficiary}
-                                            style={{ background: 'none', border: 'none', padding: 0, color: '#1565c0', fontWeight: 'bold', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
-                                        >
-                                            📋 Clique aqui para cadastrar agora
-                                        </button>
-                                    </div>
+                                    <NotFoundLink label="Esse fornecedor ainda não está no cadastro." onClick={handleGoRegisterBeneficiary} />
                                 )}
                                 {filteredBeneficiaries.slice(0, 50).map(b => (
                                     <div key={b.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, beneficiary: b })); advance(); }}>
@@ -547,13 +578,25 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                     {step === 'costCenter' && (
                         <Field label="Centro de Custos">
                             {values.costCenterItems.length === 0 ? (
-                                <div style={ov.pickList}>
-                                    {costCenters.map(cc => (
-                                        <div key={cc.id} style={ov.pickRow} onClick={() => pickFirstCostCenter(cc)}>
-                                            {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
-                                        </div>
-                                    ))}
-                                </div>
+                                <>
+                                    <input
+                                        style={ov.input}
+                                        value={costCenterSearch}
+                                        onChange={e => setCostCenterSearch(e.target.value)}
+                                        placeholder="Buscar centro de custos..."
+                                        autoFocus
+                                    />
+                                    <div style={ov.pickList}>
+                                        {costCenterSearch.trim() && !exactCostCenterMatch && (
+                                            <NotFoundLink label="Esse centro de custos ainda não está no cadastro." onClick={() => handleGoRegisterCostCenter(false)} />
+                                        )}
+                                        {filteredCostCenters.map(cc => (
+                                            <div key={cc.id} style={ov.pickRow} onClick={() => pickFirstCostCenter(cc)}>
+                                                {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
                             ) : (
                                 <>
                                     <div style={ov.installmentList}>
@@ -606,8 +649,18 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                                 <div style={{ fontSize: 11, fontWeight: 'bold', color: '#1565c0', marginBottom: 6 }}>
                                                     SELECIONE OUTRO CENTRO DE CUSTOS PARA RATEAR
                                                 </div>
+                                                <input
+                                                    style={ov.input}
+                                                    value={rateioCostCenterSearch}
+                                                    onChange={e => setRateioCostCenterSearch(e.target.value)}
+                                                    placeholder="Buscar centro de custos..."
+                                                    autoFocus
+                                                />
                                                 <div style={ov.pickList}>
-                                                    {costCenters.filter(cc => !values.costCenterItems.some(it => it.id === cc.id)).map(cc => (
+                                                    {rateioCostCenterSearch.trim() && !exactRateioCostCenterMatch && (
+                                                        <NotFoundLink label="Esse centro de custos ainda não está no cadastro." onClick={() => handleGoRegisterCostCenter(true)} />
+                                                    )}
+                                                    {filteredRateioCostCenters.map(cc => (
                                                         <div key={cc.id} style={ov.pickRow} onClick={() => pickRateioCostCenter(cc)}>
                                                             {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
                                                         </div>
@@ -721,6 +774,21 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+function NotFoundLink({ label, onClick }) {
+    return (
+        <div style={{ padding: '12px 14px', background: '#fff8e1', borderBottom: '1px solid #f0f0f0' }}>
+            <div style={{ fontSize: 12, color: '#795548', marginBottom: 6 }}>{label}</div>
+            <button
+                type="button"
+                onClick={onClick}
+                style={{ background: 'none', border: 'none', padding: 0, color: '#1565c0', fontWeight: 'bold', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+            >
+                📋 Clique aqui para cadastrar agora
+            </button>
         </div>
     );
 }
