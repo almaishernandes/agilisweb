@@ -101,6 +101,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
 
     const amountRef = useRef(null);
     const installmentsRef = useRef(null);
+    const flowTypeFirstBtnRef = useRef(null);
 
     const STEPS = buildSteps(values.dc_type, isCreditCard);
     // Se o passo atual não existe mais na sequência recalculada (ex: trocou
@@ -124,6 +125,9 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     useEffect(() => {
         if (step === 'amount') setTimeout(() => amountRef.current?.focus(), 50);
         if (step === 'installments' && !showInstallmentDetail) setTimeout(() => installmentsRef.current?.focus(), 50);
+        // Ao chegar no Tipo via Tab (a partir do Valor), foca o botão "Saída"
+        // para permitir continuar navegando com Tab até Entrada/Transferência.
+        if (step === 'flowType') setTimeout(() => flowTypeFirstBtnRef.current?.focus(), 50);
     }, [step, showInstallmentDetail]);
 
     // Pré-preenche a Descrição com o nome do fornecedor ao chegar nessa
@@ -139,9 +143,20 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
 
     const amountNumber = () => parseFloat(String(values.amount).replace(',', '.')) || 0;
 
+    // Enter no campo Valor já assume Saída (o caso mais comum) e pula direto
+    // o passo Tipo. Quem precisa de Entrada/Transferência usa Tab a partir
+    // do campo Valor, que leva ao passo Tipo para escolher manualmente.
     const handleAmountSubmit = () => {
         const n = amountNumber();
         if (!n || n <= 0) return;
+        setValues(v => ({ ...v, amount: n, dc_type: 'D', type: 'Expense' }));
+        setStepIndex(i => Math.min(i + 2, STEPS.length - 1));
+    };
+
+    const handleAmountTab = (e) => {
+        const n = amountNumber();
+        if (!n || n <= 0) return;
+        e.preventDefault();
         setValues(v => ({ ...v, amount: n }));
         advance();
     };
@@ -359,7 +374,10 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                     style={ov.input}
                                     value={values.amount}
                                     onChange={e => setValues(v => ({ ...v, amount: e.target.value }))}
-                                    onKeyDown={e => e.key === 'Enter' && handleAmountSubmit()}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') handleAmountSubmit();
+                                        else if (e.key === 'Tab' && !e.shiftKey) handleAmountTab(e);
+                                    }}
                                     placeholder="0,00"
                                     inputMode="decimal"
                                 />
@@ -383,6 +401,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                         <Field label="Tipo de Lançamento">
                             <div style={{ display: 'flex', gap: 10 }}>
                                 <button
+                                    ref={flowTypeFirstBtnRef}
                                     style={{ ...ov.flowBtn, background: 'rgba(239,68,68,0.1)', borderColor: '#ef4444' }}
                                     onClick={() => { setValues(v => ({ ...v, dc_type: 'D', type: 'Expense' })); advance(); }}
                                 >↓ Saída</button>
