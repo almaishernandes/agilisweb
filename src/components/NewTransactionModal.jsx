@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getSecurityContext } from '../lib/auth';
+
+// Chave usada para guardar o estado deste modal na sessionStorage enquanto o
+// usuário vai cadastrar um fornecedor novo em outra tela, e retomar exatamente
+// de onde parou ao voltar (ver handleGoRegisterBeneficiary / Transactions.jsx).
+export const NEW_TX_RESUME_KEY = 'agilis_new_tx_resume';
 
 const fmtBRL = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const todayISO = () => new Date().toISOString().split('T')[0];
@@ -77,12 +83,16 @@ function buildSteps(dcType, isCreditCard) {
 // Parcelas (com vencimento/parcelamento se >1, só em Cartão de Crédito),
 // Fornecedor, Centro de Custos (com rateio), Plano de Contas, Conferência.
 // A Conta de origem já vem fixada (a página atual).
-export default function NewTransactionModal({ account, onClose, onCreated }) {
+export default function NewTransactionModal({ account, onClose, onCreated, resumeState }) {
     const isCreditCard = (account?.account_type || '').toLowerCase().includes('cart');
+    const navigate = useNavigate();
 
-    const [stepIndex, setStepIndex] = useState(0);
-    const [values, setValues] = useState(EMPTY);
+    const [stepIndex, setStepIndex] = useState(() => resumeState?.stepIndex ?? 0);
+    const [values, setValues] = useState(() => resumeState?.values ?? EMPTY);
     const [showInstallmentDetail, setShowInstallmentDetail] = useState(false);
+    // Nome do fornecedor que o usuário acabou de cadastrar em outra tela —
+    // assim que a lista de fornecedores recarregar, seleciona automaticamente.
+    const pendingBeneficiaryNameRef = useRef(resumeState?.pendingBeneficiaryName || null);
     const [saving, setSaving] = useState(false);
     // calcTarget: null | 'amount' | { cc: idx } — identifica onde o resultado
     // da calculadora deve ser escrito (Valor geral ou o valor de um item de rateio).
@@ -93,7 +103,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     const [costCenters, setCostCenters] = useState([]);
     const [chartAccounts, setChartAccounts] = useState([]);
     const [otherAccounts, setOtherAccounts] = useState([]);
-    const [beneficiarySearch, setBeneficiarySearch] = useState('');
+    const [beneficiarySearch, setBeneficiarySearch] = useState(() => resumeState?.pendingBeneficiaryName || '');
     const [chartAccountSearch, setChartAccountSearch] = useState('');
     const [rateioPickerOpen, setRateioPickerOpen] = useState(false);
     const [listeningDescription, setListeningDescription] = useState(false);
@@ -118,9 +128,24 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                 .then(({ data }) => setOtherAccounts(data || []));
         });
         // Vencimento padrão já vem calculado (fatura do mês seguinte à emissão),
-        // mesmo para 1 parcela só — o usuário pode ajustar se precisar.
-        setValues(v => ({ ...v, firstDueDate: calculateDueDate(todayISO(), account) }));
+        // mesmo para 1 parcela só — o usuário pode ajustar se precisar. Ao
+        // retomar depois de cadastrar fornecedor, o valor já digitado antes fica.
+        if (!resumeState) {
+            setValues(v => ({ ...v, firstDueDate: calculateDueDate(todayISO(), account) }));
+        }
     }, [account.id]);
+
+    // Ao voltar do cadastro de Fornecedores, seleciona automaticamente o que
+    // acabou de ser criado assim que a lista recarregar, e segue o fluxo.
+    useEffect(() => {
+        if (!pendingBeneficiaryNameRef.current || beneficiaries.length === 0) return;
+        const match = beneficiaries.find(b => b.name.toLowerCase() === pendingBeneficiaryNameRef.current.trim().toLowerCase());
+        if (match) {
+            pendingBeneficiaryNameRef.current = null;
+            setValues(v => ({ ...v, beneficiary: match }));
+            advance();
+        }
+    }, [beneficiaries]);
 
     useEffect(() => {
         if (step === 'amount') setTimeout(() => amountRef.current?.focus(), 50);
@@ -195,6 +220,20 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
         b.name.toLowerCase().includes(beneficiarySearch.trim().toLowerCase())
     );
     const exactBeneficiaryMatch = beneficiaries.some(b => b.name.toLowerCase() === beneficiarySearch.trim().toLowerCase());
+
+    // Guarda o lançamento em andamento e manda para o cadastro completo de
+    // Fornecedores; ao voltar, o efeito acima seleciona o recém-criado e segue.
+    const handleGoRegisterBeneficiary = () => {
+        const name = beneficiarySearch.trim();
+        if (!name) return;
+        sessionStorage.setItem(NEW_TX_RESUME_KEY, JSON.stringify({
+            accountId: account.id,
+            stepIndex,
+            values,
+            pendingBeneficiaryName: name,
+        }));
+        navigate(`/beneficiaries?returnTo=/transactions/${account.id}&prefill=${encodeURIComponent(name)}`);
+    };
 
     const filteredChartAccounts = chartAccounts.filter(coa => {
         const q = chartAccountSearch.trim().toLowerCase();
@@ -483,11 +522,17 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                             />
                             <div style={ov.pickList}>
                                 {beneficiarySearch.trim() && !exactBeneficiaryMatch && (
-                                    <div
-                                        style={{ ...ov.pickRow, background: 'rgba(204,255,0,0.08)' }}
-                                        onClick={() => { setValues(v => ({ ...v, beneficiary: { id: null, name: beneficiarySearch.trim() } })); advance(); }}
-                                    >
-                                        + Usar "{beneficiarySearch.trim()}" (novo fornecedor)
+                                    <div style={{ padding: '12px 14px', background: '#fff8e1', borderBottom: '1px solid #f0f0f0' }}>
+                                        <div style={{ fontSize: 12, color: '#795548', marginBottom: 6 }}>
+                                            Esse fornecedor ainda não está no cadastro.
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleGoRegisterBeneficiary}
+                                            style={{ background: 'none', border: 'none', padding: 0, color: '#1565c0', fontWeight: 'bold', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                                        >
+                                            📋 Clique aqui para cadastrar agora
+                                        </button>
                                     </div>
                                 )}
                                 {filteredBeneficiaries.slice(0, 50).map(b => (

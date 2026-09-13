@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { getSecurityContext } from '../lib/auth';
 import { seedChartOfAccountsIfEmpty } from '../lib/seedChartOfAccounts';
 import AdvancedDatePicker from '../components/AdvancedDatePicker';
-import NewTransactionModal from '../components/NewTransactionModal';
+import NewTransactionModal, { NEW_TX_RESUME_KEY } from '../components/NewTransactionModal';
 import { X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
@@ -28,6 +28,7 @@ const Transactions = () => {
     const [editingCell, setEditingCell] = useState(null);
     const [headerFormOpen, setHeaderFormOpen] = useState(false);
     const [newTxModalOpen, setNewTxModalOpen] = useState(false);
+    const [newTxResumeState, setNewTxResumeState] = useState(null);
     const [editingRowId, setEditingRowId] = useState(null);
     const [sortField] = useState('due_date');
     const [selectedRowIds, setSelectedRowIds] = useState(new Set());
@@ -302,6 +303,23 @@ const Transactions = () => {
             tableRef.current.parentElement.scrollTop = 0;
         }
     }, [accountId]);
+
+    // Retoma o modal "Novo Lançamento" ao voltar do cadastro de Fornecedores
+    // (usuário digitou um fornecedor novo, foi cadastrar, e volta pra cá
+    // exatamente de onde parou, com o fornecedor recém-criado já selecionado).
+    useEffect(() => {
+        if (!selectedAccount) return;
+        const raw = sessionStorage.getItem(NEW_TX_RESUME_KEY);
+        if (!raw) return;
+        try {
+            const saved = JSON.parse(raw);
+            if (saved.accountId === selectedAccount.id) {
+                setNewTxResumeState(saved);
+                setNewTxModalOpen(true);
+            }
+        } catch { /* ignora estado inválido */ }
+        sessionStorage.removeItem(NEW_TX_RESUME_KEY);
+    }, [selectedAccount]);
 
     // Sorted view: keep 'new' row always last
     const getDateGroupBackground = (date) => {
@@ -3204,7 +3222,8 @@ const Transactions = () => {
             {newTxModalOpen && selectedAccount && (
                 <NewTransactionModal
                     account={selectedAccount}
-                    onClose={() => setNewTxModalOpen(false)}
+                    resumeState={newTxResumeState}
+                    onClose={() => { setNewTxModalOpen(false); setNewTxResumeState(null); }}
                     onCreated={() => fetchTransactions(selectedAccount)}
                 />
             )}
