@@ -84,7 +84,9 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     const [values, setValues] = useState(EMPTY);
     const [showInstallmentDetail, setShowInstallmentDetail] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [calcOpen, setCalcOpen] = useState(false);
+    // calcTarget: null | 'amount' | { cc: idx } — identifica onde o resultado
+    // da calculadora deve ser escrito (Valor geral ou o valor de um item de rateio).
+    const [calcTarget, setCalcTarget] = useState(null);
     const [calcDisplay, setCalcDisplay] = useState('');
 
     const [beneficiaries, setBeneficiaries] = useState([]);
@@ -154,7 +156,11 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                 const result = Function('"use strict"; return (' + safeExpr + ')')();
                 const rounded = Math.round(result * 100) / 100;
                 setCalcDisplay(String(rounded));
-                setValues(v => ({ ...v, amount: rounded }));
+                if (calcTarget && typeof calcTarget === 'object') {
+                    updateCcAmount(calcTarget.cc, rounded);
+                } else {
+                    setValues(v => ({ ...v, amount: rounded }));
+                }
             } catch { /* ignora expressão inválida */ }
             return;
         }
@@ -342,29 +348,14 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                 <button
                                     type="button"
                                     title="Calculadora"
-                                    onClick={() => { setCalcDisplay(String(values.amount || '')); setCalcOpen(o => !o); }}
-                                    style={{ ...ov.calcToggleBtn, background: calcOpen ? '#0f172a' : '#f1f5f9', color: calcOpen ? '#f1f5f9' : '#334155' }}
+                                    onClick={() => { setCalcDisplay(String(values.amount || '')); setCalcTarget(t => t === 'amount' ? null : 'amount'); }}
+                                    style={{ ...ov.calcToggleBtn, background: calcTarget === 'amount' ? '#0f172a' : '#f1f5f9', color: calcTarget === 'amount' ? '#f1f5f9' : '#334155' }}
                                 >
                                     🧮
                                 </button>
                             </div>
 
-                            {calcOpen && (
-                                <div style={ov.calcBox}>
-                                    <div style={ov.calcDisplay}>{calcDisplay || '0'}</div>
-                                    {CALC_KEYS.map((row, ri) => (
-                                        <div key={ri} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-                                            {row.map((k, ki) => k === '' ? (
-                                                <div key={ki} style={{ flex: 1 }} />
-                                            ) : k === '=' ? (
-                                                <button key={ki} type="button" onClick={() => calcPress(k)} style={{ ...ov.calcKey, flex: 2, background: '#16a34a', color: '#fff' }}>✓</button>
-                                            ) : (
-                                                <button key={ki} type="button" onClick={() => calcPress(k)} style={{ ...ov.calcKey, background: ['C', '⌫', '/', '*', '-', '+'].includes(k) ? '#475569' : '#334155', color: k === 'C' ? '#fca5a5' : '#f1f5f9' }}>{k}</button>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            {calcTarget === 'amount' && <CalcPanel display={calcDisplay} onPress={calcPress} />}
 
                             <button style={{ ...ov.primaryBtn, marginTop: 12, width: '100%' }} onClick={handleAmountSubmit}>Avançar</button>
                         </Field>
@@ -485,18 +476,29 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
                                 <>
                                     <div style={ov.installmentList}>
                                         {values.costCenterItems.map((it, idx) => (
-                                            <div key={idx} style={{ ...ov.installmentRow, alignItems: 'center' }}>
-                                                <span style={{ flex: 1 }}>{it.full_code ? `${it.full_code} - ` : ''}{it.description}</span>
-                                                <input
-                                                    style={ov.ccAmountInput}
-                                                    value={it.amount}
-                                                    onChange={e => updateCcAmount(idx, e.target.value)}
-                                                    inputMode="decimal"
-                                                />
-                                                {values.costCenterItems.length > 1 && (
-                                                    <button type="button" onClick={() => removeCcItem(idx)} style={ov.removeBtn}>✕</button>
-                                                )}
-                                            </div>
+                                            <React.Fragment key={idx}>
+                                                <div style={{ ...ov.installmentRow, alignItems: 'center' }}>
+                                                    <span style={{ flex: 1 }}>{it.full_code ? `${it.full_code} - ` : ''}{it.description}</span>
+                                                    <input
+                                                        style={ov.ccAmountInput}
+                                                        value={it.amount}
+                                                        onChange={e => updateCcAmount(idx, e.target.value)}
+                                                        inputMode="decimal"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        title="Calculadora"
+                                                        onClick={() => { setCalcDisplay(String(it.amount || '')); setCalcTarget(t => (t && t.cc === idx) ? null : { cc: idx }); }}
+                                                        style={{ ...ov.calcToggleBtnSmall, background: calcTarget?.cc === idx ? '#0f172a' : '#f1f5f9', color: calcTarget?.cc === idx ? '#f1f5f9' : '#334155' }}
+                                                    >
+                                                        🧮
+                                                    </button>
+                                                    {values.costCenterItems.length > 1 && (
+                                                        <button type="button" onClick={() => removeCcItem(idx)} style={ov.removeBtn}>✕</button>
+                                                    )}
+                                                </div>
+                                                {calcTarget?.cc === idx && <CalcPanel display={calcDisplay} onPress={calcPress} />}
+                                            </React.Fragment>
                                         ))}
                                     </div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', fontSize: 12, color: ccRemaining === 0 ? '#2e7d32' : '#e65100', fontWeight: 'bold' }}>
@@ -631,6 +633,25 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     );
 }
 
+function CalcPanel({ display, onPress }) {
+    return (
+        <div style={ov.calcBox}>
+            <div style={ov.calcDisplay}>{display || '0'}</div>
+            {CALC_KEYS.map((row, ri) => (
+                <div key={ri} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                    {row.map((k, ki) => k === '' ? (
+                        <div key={ki} style={{ flex: 1 }} />
+                    ) : k === '=' ? (
+                        <button key={ki} type="button" onClick={() => onPress(k)} style={{ ...ov.calcKey, flex: 2, background: '#16a34a', color: '#fff' }}>✓</button>
+                    ) : (
+                        <button key={ki} type="button" onClick={() => onPress(k)} style={{ ...ov.calcKey, background: ['C', '⌫', '/', '*', '-', '+'].includes(k) ? '#475569' : '#334155', color: k === 'C' ? '#fca5a5' : '#f1f5f9' }}>{k}</button>
+                    ))}
+                </div>
+            ))}
+        </div>
+    );
+}
+
 function Field({ label, children }) {
     return (
         <div style={{ marginBottom: 16 }}>
@@ -680,6 +701,7 @@ const ov = {
     removeBtn: { background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' },
     rateioPanel: { marginTop: 10, padding: 10, background: '#e3f2fd', borderRadius: 8, border: '1px solid #90caf9' },
     calcToggleBtn: { width: 44, borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 18, cursor: 'pointer' },
+    calcToggleBtnSmall: { width: 26, height: 26, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 12, cursor: 'pointer', flexShrink: 0 },
     calcBox: { marginTop: 8, background: '#1e293b', borderRadius: 8, padding: 10 },
     calcDisplay: { background: '#0f172a', borderRadius: 4, padding: '6px 10px', marginBottom: 8, textAlign: 'right', fontSize: 18, fontWeight: 'bold', color: '#f1f5f9', minHeight: 32, letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
     calcKey: { flex: 1, padding: '9px 0', border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer' },
