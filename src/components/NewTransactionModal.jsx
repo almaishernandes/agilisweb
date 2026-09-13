@@ -94,6 +94,7 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
     const [chartAccounts, setChartAccounts] = useState([]);
     const [otherAccounts, setOtherAccounts] = useState([]);
     const [beneficiarySearch, setBeneficiarySearch] = useState('');
+    const [chartAccountSearch, setChartAccountSearch] = useState('');
     const [rateioPickerOpen, setRateioPickerOpen] = useState(false);
     const [listeningDescription, setListeningDescription] = useState(false);
     const descriptionRecognitionRef = useRef(null);
@@ -179,6 +180,12 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
         b.name.toLowerCase().includes(beneficiarySearch.trim().toLowerCase())
     );
     const exactBeneficiaryMatch = beneficiaries.some(b => b.name.toLowerCase() === beneficiarySearch.trim().toLowerCase());
+
+    const filteredChartAccounts = chartAccounts.filter(coa => {
+        const q = chartAccountSearch.trim().toLowerCase();
+        if (!q) return true;
+        return coa.description.toLowerCase().includes(q) || (coa.code || '').toLowerCase().includes(q);
+    });
 
     const resolveBeneficiaryId = async () => {
         if (values.beneficiary?.id) return values.beneficiary.id;
@@ -553,12 +560,22 @@ export default function NewTransactionModal({ account, onClose, onCreated }) {
 
                     {step === 'chartAccount' && (
                         <Field label="Plano de Contas">
+                            <input
+                                style={ov.input}
+                                value={chartAccountSearch}
+                                onChange={e => setChartAccountSearch(e.target.value)}
+                                placeholder="Buscar plano de contas..."
+                                autoFocus
+                            />
                             <div style={ov.pickList}>
-                                {chartAccounts.map(coa => (
+                                {filteredChartAccounts.map(coa => (
                                     <div key={coa.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, chartAccount: coa })); advance(); }}>
                                         {coa.code ? `${coa.code} - ` : ''}{coa.description}
                                     </div>
                                 ))}
+                                {filteredChartAccounts.length === 0 && (
+                                    <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Nenhum resultado encontrado.</div>
+                                )}
                             </div>
                         </Field>
                     )}
