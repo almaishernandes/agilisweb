@@ -311,6 +311,11 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
         setValues(v => ({ ...v, costCenterItems: v.costCenterItems.filter((_, i) => i !== idx) }));
     };
 
+    const handleCcAdvance = () => {
+        if (ccRemaining !== 0) { alert('O restante a alocar precisa ser R$ 0,00 antes de avançar.'); return; }
+        advance();
+    };
+
     const handleConfirm = async () => {
         if (values.dc_type !== 'T' && ccRemaining !== 0) {
             alert('O restante a alocar do Centro de Custos precisa ser R$ 0,00.');
@@ -534,6 +539,7 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                     style={ov.input}
                                     value={values.firstDueDate}
                                     onChange={e => setValues(v => ({ ...v, firstDueDate: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), setShowInstallmentDetail(false), advance())}
                                 />
                             </Field>
                             {Number(values.installments) > 1 && (
@@ -608,6 +614,7 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                                         style={ov.ccAmountInput}
                                                         value={it.amount}
                                                         onChange={e => updateCcAmount(idx, e.target.value)}
+                                                        onKeyDown={e => e.key === 'Enter' && handleCcAdvance()}
                                                         inputMode="decimal"
                                                     />
                                                     <button
@@ -636,10 +643,7 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                             <button type="button" style={ov.secondaryBtn} onClick={() => setRateioPickerOpen(true)}>↗ Rateio</button>
                                             <button
                                                 style={{ ...ov.primaryBtn, opacity: ccRemaining !== 0 ? 0.4 : 1 }}
-                                                onClick={() => {
-                                                    if (ccRemaining !== 0) { alert('O restante a alocar precisa ser R$ 0,00 antes de avançar.'); return; }
-                                                    advance();
-                                                }}
+                                                onClick={handleCcAdvance}
                                             >Avançar</button>
                                         </div>
                                     ) : (
