@@ -532,14 +532,13 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                     )}
 
                     {step === 'installments' && showInstallmentDetail && (
-                        <>
+                        <form onSubmit={e => { e.preventDefault(); setShowInstallmentDetail(false); advance(); }}>
                             <Field label={Number(values.installments) > 1 ? 'Vencimento da 1ª Parcela' : 'Vencimento'}>
                                 <input
                                     type="date"
                                     style={ov.input}
                                     value={values.firstDueDate}
                                     onChange={e => setValues(v => ({ ...v, firstDueDate: e.target.value }))}
-                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), setShowInstallmentDetail(false), advance())}
                                 />
                             </Field>
                             {Number(values.installments) > 1 && (
@@ -555,8 +554,8 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                     </div>
                                 </Field>
                             )}
-                            <button style={ov.primaryBtn} onClick={() => { setShowInstallmentDetail(false); advance(); }}>Continuar</button>
-                        </>
+                            <button type="submit" style={ov.primaryBtn}>Continuar</button>
+                        </form>
                     )}
 
                     {step === 'beneficiary' && (
