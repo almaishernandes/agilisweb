@@ -174,13 +174,6 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
         if (step === 'flowType') setTimeout(() => flowTypeFirstBtnRef.current?.focus(), 50);
     }, [step, showInstallmentDetail]);
 
-    // Pré-preenche a Descrição com o nome do fornecedor ao chegar nessa
-    // etapa pela primeira vez — o usuário ainda pode ajustar antes de gravar.
-    useEffect(() => {
-        if (step === 'description' && !values.description && values.beneficiary?.name) {
-            setValues(v => ({ ...v, description: v.beneficiary?.name || '' }));
-        }
-    }, [step]);
 
     const advance = () => setStepIndex(i => Math.min(i + 1, STEPS.length - 1));
     const goBack = () => setStepIndex(i => Math.max(i - 1, 0));
@@ -519,10 +512,10 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                             <div style={ov.pickList}>
                                 {otherAccounts.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Nenhuma outra conta cadastrada.</div>}
                                 {otherAccounts.map(acc => (
-                                    <div key={acc.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, destinoAccount: acc })); advance(); }}>
+                                    <PickRow key={acc.id} onSelect={() => { setValues(v => ({ ...v, destinoAccount: acc })); advance(); }}>
                                         <strong>{acc.name}</strong>
                                         <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>{acc.account_type}</span>
-                                    </div>
+                                    </PickRow>
                                 ))}
                             </div>
                         </Field>
@@ -575,6 +568,11 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                 style={ov.input}
                                 value={beneficiarySearch}
                                 onChange={e => setBeneficiarySearch(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key !== 'Enter') return;
+                                    if (filteredBeneficiaries.length > 0) { setValues(v => ({ ...v, beneficiary: filteredBeneficiaries[0] })); advance(); }
+                                    else if (beneficiarySearch.trim() && !exactBeneficiaryMatch) handleGoRegisterBeneficiary();
+                                }}
                                 placeholder="Buscar ou digitar novo fornecedor..."
                                 autoFocus
                             />
@@ -583,9 +581,9 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                     <NotFoundLink label="Esse fornecedor ainda não está no cadastro." onClick={handleGoRegisterBeneficiary} />
                                 )}
                                 {filteredBeneficiaries.slice(0, 50).map(b => (
-                                    <div key={b.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, beneficiary: b })); advance(); }}>
+                                    <PickRow key={b.id} onSelect={() => { setValues(v => ({ ...v, beneficiary: b })); advance(); }}>
                                         {b.name}
-                                    </div>
+                                    </PickRow>
                                 ))}
                             </div>
                         </Field>
@@ -599,6 +597,11 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                         style={ov.input}
                                         value={costCenterSearch}
                                         onChange={e => setCostCenterSearch(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key !== 'Enter') return;
+                                            if (filteredCostCenters.length > 0) pickFirstCostCenter(filteredCostCenters[0]);
+                                            else if (costCenterSearch.trim() && !exactCostCenterMatch) handleGoRegisterCostCenter(false);
+                                        }}
                                         placeholder="Buscar centro de custos..."
                                         autoFocus
                                     />
@@ -607,9 +610,9 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                             <NotFoundLink label="Esse centro de custos ainda não está no cadastro." onClick={() => handleGoRegisterCostCenter(false)} />
                                         )}
                                         {filteredCostCenters.map(cc => (
-                                            <div key={cc.id} style={ov.pickRow} onClick={() => pickFirstCostCenter(cc)}>
+                                            <PickRow key={cc.id} onSelect={() => pickFirstCostCenter(cc)}>
                                                 {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
-                                            </div>
+                                            </PickRow>
                                         ))}
                                     </div>
                                 </>
@@ -667,6 +670,11 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                                     style={ov.input}
                                                     value={rateioCostCenterSearch}
                                                     onChange={e => setRateioCostCenterSearch(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key !== 'Enter') return;
+                                                        if (filteredRateioCostCenters.length > 0) pickRateioCostCenter(filteredRateioCostCenters[0]);
+                                                        else if (rateioCostCenterSearch.trim() && !exactRateioCostCenterMatch) handleGoRegisterCostCenter(true);
+                                                    }}
                                                     placeholder="Buscar centro de custos..."
                                                     autoFocus
                                                 />
@@ -675,9 +683,9 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                                         <NotFoundLink label="Esse centro de custos ainda não está no cadastro." onClick={() => handleGoRegisterCostCenter(true)} />
                                                     )}
                                                     {filteredRateioCostCenters.map(cc => (
-                                                        <div key={cc.id} style={ov.pickRow} onClick={() => pickRateioCostCenter(cc)}>
+                                                        <PickRow key={cc.id} onSelect={() => pickRateioCostCenter(cc)}>
                                                             {cc.full_code ? `${cc.full_code} - ` : ''}{cc.description}
-                                                        </div>
+                                                        </PickRow>
                                                     ))}
                                                 </div>
                                                 <button type="button" style={{ ...ov.secondaryBtn, marginTop: 8, width: '100%' }} onClick={() => setRateioPickerOpen(false)}>Fechar</button>
@@ -695,14 +703,20 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                                 style={ov.input}
                                 value={chartAccountSearch}
                                 onChange={e => setChartAccountSearch(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' && filteredChartAccounts.length > 0) {
+                                        setValues(v => ({ ...v, chartAccount: filteredChartAccounts[0] }));
+                                        advance();
+                                    }
+                                }}
                                 placeholder="Buscar plano de contas..."
                                 autoFocus
                             />
                             <div style={ov.pickList}>
                                 {filteredChartAccounts.map(coa => (
-                                    <div key={coa.id} style={ov.pickRow} onClick={() => { setValues(v => ({ ...v, chartAccount: coa })); advance(); }}>
+                                    <PickRow key={coa.id} onSelect={() => { setValues(v => ({ ...v, chartAccount: coa })); advance(); }}>
                                         {coa.code ? `${coa.code} - ` : ''}{coa.description}
-                                    </div>
+                                    </PickRow>
                                 ))}
                                 {filteredChartAccounts.length === 0 && (
                                     <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Nenhum resultado encontrado.</div>
@@ -788,6 +802,23 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+// Linha de lista clicável, acessível também por teclado (Tab + Enter fazem
+// exatamente o mesmo que o clique do mouse) — mesma regra em toda a lista de
+// seleção do modal (Fornecedor, Centro de Custos, Plano de Contas, Conta Destino).
+function PickRow({ onSelect, children, style }) {
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            style={{ ...ov.pickRow, ...style }}
+            onClick={onSelect}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
+        >
+            {children}
         </div>
     );
 }
