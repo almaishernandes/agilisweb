@@ -216,10 +216,21 @@ export default function NewTransactionModal({ account, onClose, onCreated, resum
                 const result = Function('"use strict"; return (' + safeExpr + ')')();
                 const rounded = Math.round(result * 100) / 100;
                 setCalcDisplay(String(rounded));
+
+                // Enter/= já grava o valor E fecha a calculadora, "assumindo"
+                // o botão em destaque (Avançar/Continuar) na sequência — sem
+                // precisar clicar em mais nada depois de calcular.
                 if (calcTarget && typeof calcTarget === 'object') {
-                    updateCcAmount(calcTarget.cc, rounded);
+                    const idx = calcTarget.cc;
+                    const othersTotal = values.costCenterItems.reduce((s, it, i) => i === idx ? s : s + Number(it.amount || 0), 0);
+                    const predictedRemaining = Math.round((amountNumber() - othersTotal - rounded) * 100) / 100;
+                    updateCcAmount(idx, rounded);
+                    setCalcTarget(null);
+                    if (predictedRemaining === 0) advance();
                 } else {
-                    setValues(v => ({ ...v, amount: rounded }));
+                    setCalcTarget(null);
+                    setValues(v => ({ ...v, amount: rounded, dc_type: 'D', type: 'Expense' }));
+                    setStepIndex(i => Math.min(i + 2, STEPS.length - 1));
                 }
             } catch { /* ignora expressão inválida */ }
             return;
