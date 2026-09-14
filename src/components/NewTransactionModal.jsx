@@ -797,8 +797,24 @@ function NotFoundLink({ label, onClick }) {
 }
 
 function CalcPanel({ display, onPress }) {
+    const boxRef = useRef(null);
+
+    // Foca a calculadora ao abrir, para o teclado físico funcionar direto,
+    // sem precisar clicar em nenhum botão primeiro.
+    useEffect(() => { boxRef.current?.focus(); }, []);
+
+    const handleKeyDown = (e) => {
+        const key = e.key;
+        if (key >= '0' && key <= '9') { e.preventDefault(); onPress(key); return; }
+        if (key === '.' || key === ',') { e.preventDefault(); onPress(','); return; }
+        if (['+', '-', '*', '/'].includes(key)) { e.preventDefault(); onPress(key); return; }
+        if (key === 'Backspace') { e.preventDefault(); onPress('⌫'); return; }
+        if (key === 'Enter' || key === '=') { e.preventDefault(); onPress('='); return; }
+        if (key === 'Escape' || key.toLowerCase() === 'c') { e.preventDefault(); onPress('C'); return; }
+    };
+
     return (
-        <div style={ov.calcBox}>
+        <div ref={boxRef} style={ov.calcBox} tabIndex={0} onKeyDown={handleKeyDown}>
             <div style={ov.calcDisplay}>{display || '0'}</div>
             {CALC_KEYS.map((row, ri) => (
                 <div key={ri} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
@@ -865,7 +881,7 @@ const ov = {
     rateioPanel: { marginTop: 10, padding: 10, background: '#e3f2fd', borderRadius: 8, border: '1px solid #90caf9' },
     calcToggleBtn: { width: 44, borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 18, cursor: 'pointer' },
     calcToggleBtnSmall: { width: 26, height: 26, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 12, cursor: 'pointer', flexShrink: 0 },
-    calcBox: { marginTop: 8, background: '#1e293b', borderRadius: 8, padding: 10 },
+    calcBox: { marginTop: 8, background: '#1e293b', borderRadius: 8, padding: 10, outline: 'none' },
     calcDisplay: { background: '#0f172a', borderRadius: 4, padding: '6px 10px', marginBottom: 8, textAlign: 'right', fontSize: 18, fontWeight: 'bold', color: '#f1f5f9', minHeight: 32, letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
     calcKey: { flex: 1, padding: '9px 0', border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer' },
 };
